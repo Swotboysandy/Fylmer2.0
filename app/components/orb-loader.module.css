@@ -1,0 +1,105 @@
+.loader {
+	--time-animation: 2s;
+	width: 100px;
+	height: 100px;
+	position: relative;
+	animation: colorize calc(var(--time-animation) * 3) ease-in-out infinite;
+}
+
+.loader .box {
+	width: 100px;
+	height: 100px;
+	background: linear-gradient(180deg, var(--orb-from) 30%, var(--orb-to) 70%);
+	mask: url(#clipping);
+	-webkit-mask: url(#clipping);
+}
+
+.loader svg {
+	position: absolute;
+}
+
+.loader svg :global(#clipping) {
+	filter: contrast(15);
+	animation: roundness calc(var(--time-animation) / 2) linear infinite;
+}
+
+.loader svg :global(#clipping) polygon {
+	filter: blur(12px);
+}
+
+.loader svg :global(#clipping) polygon:nth-child(1) {
+	transform-origin: 75% 25%;
+	transform: rotate(90deg);
+}
+
+.loader svg :global(#clipping) polygon:nth-child(2) {
+	transform-origin: 50% 50%;
+	animation: rotation var(--time-animation) linear infinite reverse;
+}
+
+.loader svg :global(#clipping) polygon:nth-child(3) {
+	transform-origin: 50% 60%;
+	animation: rotation var(--time-animation) linear infinite;
+	animation-delay: calc(var(--time-animation) / -3);
+}
+
+.loader svg :global(#clipping) polygon:nth-child(4) {
+	transform-origin: 40% 40%;
+	animation: rotation var(--time-animation) linear infinite reverse;
+}
+
+@keyframes rotation {
+	0% {
+		transform: rotate(0deg);
+	}
+	100% {
+		transform: rotate(360deg);
+	}
+}
+
+@keyframes roundness {
+	0% {
+		filter: contrast(15);
+	}
+	20% {
+		filter: contrast(3);
+	}
+	40% {
+		filter: contrast(3);
+	}
+	60% {
+		filter: contrast(15);
+	}
+	100% {
+		filter: contrast(15);
+	}
+}
+
+@keyframes colorize {
+	0% {
+		filter: hue-rotate(0deg);
+	}
+	20% {
+		filter: hue-rotate(-30deg);
+	}
+	40% {
+		filter: hue-rotate(-60deg);
+	}
+	60% {
+		filter: hue-rotate(-90deg);
+	}
+	80% {
+		filter: hue-rotate(-45deg);
+	}
+	100% {
+		filter: hue-rotate(0deg);
+	}
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.loader,
+	.loader svg :global(#clipping),
+	.loader svg :global(#clipping) polygon {
+		animation: none;
+	}
+}

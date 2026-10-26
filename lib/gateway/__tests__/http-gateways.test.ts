@@ -1,0 +1,204 @@
+import { describe, expect, it, vi, beforeEach } from "vitest";
+import { HttpAssetGateway, HttpLLMGateway, HttpTTSGateway } from "../http";
+
+/** Routes are app-relative, so they parse against any origin. */
+const parseUrl = (url: string) => new URL(url, "http://localhost");
+
+function jsonResponse(data: unknown) {
+	return new Response(JSON.stringify(data), {
+		status: 200,
+		headers: { "content-type": "application/json" },
+	});
+}
+
+function sseResponse(events: unknown[]) {
+	const body = events.map((e) => `data: ${JSON.stringify(e)}\n\n`).join("");
+	return new Response(body, {
+		status: 200,
+		headers: { "content-type": "text/event-stream" },
+	});
+}
+
+const HOSTED_IMAGE = { provider: "openslop", model: "Seedream 5 Lite" } as const;
+const BYOK_IMAGE = { provider: "runware", model: "Seedream 5 Lite" } as const;
+const HOSTED_VIDEO = { provider: "openslop", model: "Seedance 2 Fast" } as const;
+const HOSTED_TTS = { provider: "openslop", model: "Hosted speech" } as const;
+const BYOK_TTS = { provider: "cartesia", model: "Sonic 3.6" } as const;
+const HOSTED_LLM = { provider: "openslop", model: "Claude Opus 5" } as const;
+const BYOK_LLM = { provider: "anthropic", model: "Claude Sonnet 5" } as const;
+
+describe("HTTP gateways", () => {
+	let fetchMock: ReturnType<typeof vi.fn>;
+
+	beforeEach(() => {
+		fetchMock = vi.fn();
+		vi.stubGlobal("fetch", fetchMock);
+	});
+
+	describe("HttpAssetGateway", () => {
+		// The model's provider is the whole choice of route family: same protocol,
+		// and the prefix says whose key pays for the generation.
+		it.each([
+			[HOSTED_IMAGE, "/api/v1"],
+			[BYOK_IMAGE, "/api/third-party"],
+		] as const)("posts %o generations to %s", async (model, prefix) => {
+			const submission = { jobId: "job-1", status: "pending" };
+			fetchMock.mockResolvedValue(jsonResponse(submission));
+
+			const gateway = new HttpAssetGateway(model, "image");
+
+			expect(await gateway.generate({ prompt: "a cat" })).toEqual(submission);
+			expect(fetchMock).toHaveBeenCalledWith(
+				`${prefix}/image`,
+				expect.objectContaining({ method: "POST" }),
+			);
+		});
+
+		it("polls the job it submitted", async () => {
+			const poll = {
+				jobId: "job-1",
+				status: "completed",
+				result: null,
+				error: null,
+			};
+			fetchMock.mockResolvedValue(jsonResponse(poll));
+
+			const gateway = new HttpAssetGateway(HOSTED_VIDEO, "video");
+
+			expect(await gateway.poll("job-1")).toEqual(poll);
+			expect(fetchMock).toHaveBeenCalledWith(
+				`/api/v1/video/job-1`,
+				expect.objectContaining({ method: "GET" }),
+			);
+		});
+
+		it("hands the abort signal to the poll request", async () => {
+			fetchMock.mockResolvedValue(
+				jsonResponse({
+					jobId: "job-1",
+					status: "processing",
+					result: null,
+					error: null,
+				}),
+			);
+			const { signal } = new AbortController();
+
+			await new HttpAssetGateway(HOSTED_VIDEO, "video").poll("job-1", signal);
+
+			expect(fetchMock).toHaveBeenCalledWith(
+				`/api/v1/video/job-1`,
+				expect.objectContaining({ signal }),
+			);
+		});
+	});
+
+	describe("HttpTTSGateway", () => {
+		it("searches voices with the query it was given", async () => {
+			const voices = [{ id: "v1", name: "Alice", gender: "feminine" }];
+			fetchMock.mockResolvedValue(jsonResponse({ voices }));
+
+			const gateway = new HttpTTSGateway(HOSTED_TTS);
+
+			expect(
+				await gateway.searchVoices({ gender: "feminine", limit: 5 }),
+			).toEqual(voices);
+			const url = parseUrl(fetchMock.mock.calls[0][0] as string);
+			expect(url.pathname).toBe("/api/v1/tts/voices");
+			expect(url.searchParams.get("gender")).toBe("feminine");
+			expect(url.searchParams.get("limit")).toBe("5");
+			expect(url.searchParams.get("provider")).toBe("openslop");
+			expect(url.searchParams.get("model")).toBe("Hosted speech");
+		});
+
+		it("hands previews back as the vendor names them", async () => {
+			const voices = [
+				{ id: "v1", name: "Alice", previewUrl: "https://vendor/a.mp3" },
+			];
+			fetchMock.mockResolvedValue(jsonResponse({ voices }));
+
+			await expect(
+				new HttpTTSGateway(BYOK_TTS).searchVoices({}),
+			).resolves.toEqual(voices);
+		});
+
+		it("asks its own family for a voice's preview, naming the model", async () => {
+			const preview = { url: "https://assets/preview.mp3", durationSec: 6 };
+			fetchMock.mockResolvedValue(jsonResponse({ preview }));
+
+			await expect(
+				new HttpTTSGateway(BYOK_TTS).voicePreview("v-sol"),
+			).resolves.toEqual(preview);
+
+			const url = parseUrl(fetchMock.mock.calls[0][0] as string);
+			expect(url.pathname).toBe("/api/third-party/tts/voices/preview");
+			expect(url.searchParams.get("voiceId")).toBe("v-sol");
+			expect(url.searchParams.get("provider")).toBe("cartesia");
+			expect(url.searchParams.get("model")).toBe("Sonic 3.6");
+		});
+
+		// A voice search names its model like a generation does, so the route
+		// knows whose key to read.
+		it("names its model when the key is the user's own", async () => {
+			fetchMock.mockResolvedValue(jsonResponse({ voices: [] }));
+
+			await new HttpTTSGateway(BYOK_TTS).searchVoices({
+				query: undefined,
+			});
+
+			const url = parseUrl(fetchMock.mock.calls[0][0] as string);
+			expect(url.pathname).toBe("/api/third-party/tts/voices");
+			expect(url.searchParams.get("provider")).toBe("cartesia");
+			expect(url.searchParams.get("model")).toBe("Sonic 3.6");
+			expect(url.searchParams.has("query")).toBe(false);
+		});
+	});
+
+	describe("HttpLLMGateway", () => {
+		it("posts a non-streaming generation", async () => {
+			const response = { text: "Hello!", model: "claude-3" };
+			fetchMock.mockResolvedValue(jsonResponse(response));
+
+			const gateway = new HttpLLMGateway(HOSTED_LLM);
+
+			expect(await gateway.generate({ prompt: "hi" })).toEqual(response);
+			expect(fetchMock).toHaveBeenCalledWith(
+				`/api/v1/llm`,
+				expect.objectContaining({ method: "POST" }),
+			);
+		});
+
+		it("streams SSE chunks", async () => {
+			const chunks = [
+				{ text: "Hel", done: false },
+				{ text: "lo!", done: true },
+			];
+			fetchMock.mockResolvedValue(sseResponse(chunks));
+
+			const gateway = new HttpLLMGateway(BYOK_LLM);
+			const results: unknown[] = [];
+			for await (const chunk of gateway.stream({ prompt: "hi" })) {
+				results.push(chunk);
+			}
+
+			expect(results).toEqual(chunks);
+			expect(fetchMock.mock.calls[0][0]).toBe(`/api/third-party/llm`);
+			const body = JSON.parse(
+				fetchMock.mock.calls[0][1].body as string,
+			) as Record<string, unknown>;
+			expect(body.stream).toBe(true);
+		});
+
+		it("throws when a stream response has no body", async () => {
+			fetchMock.mockResolvedValue(
+				new Response(null, { status: 200, headers: {} }),
+			);
+
+			const gateway = new HttpLLMGateway(HOSTED_LLM);
+			await expect(async () => {
+				for await (const _ of gateway.stream({ prompt: "hi" })) {
+					// consume
+				}
+			}).rejects.toThrow("No response body");
+		});
+	});
+});

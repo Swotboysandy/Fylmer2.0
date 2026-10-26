@@ -1,0 +1,301 @@
+import type { AssetConnectorType, AssetResult } from "../connectors/types";
+import { MusicRightsDeclarationSchema } from "../connectors/music-rights";
+import { errorMessage } from "../errors";
+import { createEmitter } from "../store/emitter";
+import {
+	resolveConcurrencyLimits,
+	type ConcurrencyLimits,
+} from "./concurrency";
+import { generateForElement } from "./generate-for-element";
+import { SnapshotStore, type ElementSnapshot } from "./snapshots";
+import { generationInputs, needsGeneration } from "./staleness";
+import type { CommittedVersion } from "./versions";
+import { flattenGraph, type GenerationNode } from "./graph";
+
+type ActiveJob = {
+	controller: AbortController;
+	connectorType: AssetConnectorType;
+};
+
+/**
+ * Runs generation nodes, at most `limits[connectorType]` of each media type at a
+ * time and never before their dependencies have settled. All per-element state
+ * lives in the snapshot store; the queue owns only what is in flight.
+ */
+export class GenerationQueue {
+	private readonly snapshots: SnapshotStore;
+	private pending: GenerationNode[] = [];
+	private active = new Map<string, ActiveJob>();
+	private readonly limits: ConcurrencyLimits;
+	private readonly committed = createEmitter<CommittedVersion>();
+	private readonly projectId?: string;
+
+	constructor({
+		limits,
+		initialState,
+		projectId,
+	}: {
+		limits?: Partial<ConcurrencyLimits>;
+		initialState?: Record<string, ElementSnapshot>;
+		projectId?: string;
+	} = {}) {
+		this.limits = resolveConcurrencyLimits(limits);
+		this.snapshots = new SnapshotStore(initialState);
+		this.projectId = projectId;
+	}
+
+	onCommitted = this.committed.subscribe;
+
+	subscribe = (listener: () => void) => this.snapshots.subscribe(listener);
+	getElementSnapshot = (id: string): ElementSnapshot => this.snapshots.get(id);
+	getResultVersion = () => this.snapshots.getResultVersion();
+	getActiveCount = () => this.snapshots.getActiveCount();
+	getGeneratedCount = () => this.snapshots.getGeneratedCount();
+	isBusy = () => this.snapshots.isBusy();
+	snapshot = () => this.snapshots.all();
+	mergeRemoteSnapshots = (
+		baseline: Record<string, ElementSnapshot>,
+		incoming: Record<string, ElementSnapshot>,
+	) => this.snapshots.mergeRemote(baseline, incoming);
+
+	/** Roots are always queued: asking to generate something means regenerating it. */
+	enqueueGraph(roots: GenerationNode[]) {
+		const rootIds = new Set(roots.map((root) => root.id));
+		let added = false;
+		for (const node of flattenGraph(roots)) {
+			if (this.snapshots.isActive(node.id)) continue;
+			if (!rootIds.has(node.id) && !needsGeneration(node, this)) continue;
+			this.snapshots.update(node.id, {
+				status: "queued",
+				startedAt: null,
+				connectorType: node.job.connectorType,
+			});
+			this.pending.push(node);
+			added = true;
+		}
+		if (added) {
+			this.snapshots.notify();
+			this.processQueue();
+		}
+	}
+
+	cancel(elementId: string) {
+		if (!this.snapshots.isActive(elementId)) return;
+		this.abortJob(elementId);
+		this.snapshots.resetToIdle(elementId);
+		this.snapshots.notify();
+		this.processQueue();
+	}
+
+	replaceSnapshots(state: Record<string, ElementSnapshot>) {
+		this.cancelAll();
+		this.snapshots.replaceAll(state);
+	}
+
+	cancelAll() {
+		for (const { controller } of this.active.values()) controller.abort();
+		this.active.clear();
+		this.pending = [];
+		for (const id of this.snapshots.ids()) {
+			this.snapshots.resetToIdle(id);
+		}
+		this.snapshots.notify();
+	}
+
+	discard(elementId: string) {
+		const wasActive = this.snapshots.isActive(elementId);
+		if (wasActive) this.abortJob(elementId);
+		this.snapshots.remove(elementId);
+		this.snapshots.notify();
+		if (wasActive) this.processQueue();
+	}
+
+	setError(elementId: string, message: string) {
+		this.snapshots.update(elementId, { result: null, error: message });
+		this.snapshots.notify();
+	}
+
+	/**
+	 * Aborts any in-flight job first, which would otherwise land later and clobber
+	 * this. Pass `pinned` for a result the user supplied rather than asked us to
+	 * make, so drifting project state cannot let Generate All overwrite it.
+	 */
+	commitResult(
+		node: GenerationNode,
+		result: AssetResult,
+		{ pinned = false }: { pinned?: boolean } = {},
+	): void {
+		this.cancel(node.id);
+		this.commit({
+			elementId: node.id,
+			elementType: node.job.elementType,
+			connectorType: node.job.connectorType,
+			inputs: generationInputs(node, this),
+			result,
+			pinned,
+		});
+	}
+
+	setMusicRights(
+		elementId: string,
+		expectedAudioUrl: string,
+		declaration: unknown,
+	): void {
+		const snapshot = this.snapshots.get(elementId);
+		if (
+			snapshot.status !== "idle" ||
+			snapshot.connectorType !== "music" ||
+			!snapshot.result?.audioUrl ||
+			snapshot.result.audioUrl !== expectedAudioUrl
+		)
+			throw new Error(
+				"The selected music changed or is generating. Review the current take before saving its rights.",
+			);
+		const musicRights = MusicRightsDeclarationSchema.parse(declaration);
+		if (musicRights.audioUrl !== expectedAudioUrl)
+			throw new Error("Music rights must refer to the selected audio take.");
+		this.snapshots.update(elementId, {
+			result: { ...snapshot.result, musicRights },
+		});
+		this.snapshots.notify();
+	}
+
+	restoreResult({
+		elementId,
+		inputs,
+		result,
+		connectorType,
+		pinned,
+	}: CommittedVersion): void {
+		this.snapshots.update(elementId, {
+			result,
+			error: null,
+			resultInputs: inputs,
+			connectorType,
+			pinned,
+		});
+		this.snapshots.notify();
+	}
+
+	private commit(version: CommittedVersion): void {
+		this.snapshots.commit(version);
+		this.snapshots.notify();
+		this.committed.notify(version);
+	}
+
+	private abortJob(id: string) {
+		this.active.get(id)?.controller.abort();
+		this.active.delete(id);
+		this.pending = this.pending.filter((node) => node.id !== id);
+	}
+
+	/** The dependency holding `node` back, if any: it gates until it settles. */
+	private blockingDependency(node: GenerationNode) {
+		return Object.values(node.dependsOn).find(
+			(dep) =>
+				this.snapshots.isActive(dep.id) || !this.snapshots.get(dep.id).result,
+		);
+	}
+
+	private hasCapacity(connectorType: AssetConnectorType) {
+		const running = [...this.active.values()].filter(
+			(job) => job.connectorType === connectorType,
+		).length;
+		return running < this.limits[connectorType];
+	}
+
+	private processQueue() {
+		for (;;) {
+			const index = this.pending.findIndex(
+				(node) =>
+					this.hasCapacity(node.job.connectorType) &&
+					!this.blockingDependency(node),
+			);
+			if (index === -1) break;
+			const [node] = this.pending.splice(index, 1);
+			if (node) void this.runJob(node);
+		}
+		this.releaseBlocked();
+	}
+
+	/** The failure that kept `node` waiting, following the chain of blocked dependencies. */
+	private blockedByError(node: GenerationNode): string | null {
+		const dep = this.blockingDependency(node);
+		if (!dep) return null;
+		return this.snapshots.get(dep.id).error ?? this.blockedByError(dep);
+	}
+
+	/** Nothing running or runnable means a dependency never arrived: release the rest, its error on each dependent. */
+	private releaseBlocked() {
+		if (this.active.size > 0 || this.pending.length === 0) return;
+		const blocked = this.pending;
+		this.pending = [];
+		for (const node of blocked) {
+			const error = this.blockedByError(node);
+			this.snapshots.resetToIdle(node.id);
+			if (error) this.snapshots.update(node.id, { error });
+		}
+		this.snapshots.notify();
+	}
+
+	private dependencyResults(node: GenerationNode): Record<string, AssetResult> {
+		const entries = Object.entries(node.dependsOn).flatMap(([label, dep]) => {
+			const { result } = this.snapshots.get(dep.id);
+			return result ? [[label, result] as const] : [];
+		});
+		return Object.fromEntries(entries);
+	}
+
+	/** A cancelled job settles into nothing: whoever aborted it already cleaned up. */
+	private async runJob(node: GenerationNode) {
+		const {
+			id: elementId,
+			job: { elementType, connectorType },
+		} = node;
+		const controller = new AbortController();
+		const { signal } = controller;
+		this.active.set(elementId, { controller, connectorType });
+
+		this.snapshots.update(elementId, {
+			status: "generating",
+			startedAt: Date.now(),
+		});
+		this.snapshots.notify();
+
+		try {
+			const inputs = generationInputs(node, this);
+			const result = await generateForElement(
+				node,
+				this.dependencyResults(node),
+				signal,
+				this.projectId,
+			);
+			if (signal.aborted) return;
+			this.commit({
+				elementId,
+				elementType,
+				connectorType,
+				inputs,
+				result,
+				pinned: false,
+			});
+		} catch (error) {
+			if (signal.aborted) return;
+			console.error(`Generation failed for element ${elementId}:`, error);
+			this.snapshots.update(elementId, {
+				status: "idle",
+				startedAt: null,
+				result: null,
+				error: errorMessage(error),
+			});
+			this.snapshots.notify();
+		} finally {
+			if (!signal.aborted) this.finalizeJob(elementId);
+		}
+	}
+
+	private finalizeJob(elementId: string) {
+		this.active.delete(elementId);
+		this.processQueue();
+	}
+}

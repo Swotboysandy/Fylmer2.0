@@ -1,0 +1,119 @@
+import { useEffect, useRef, useState } from "react";
+import { X as XIcon, AlertCircle, Check, Copy } from "@/components/ui/icon";
+import { IconButton } from "@/components/ui/icon-button";
+import { SimpleTooltip } from "@/components/ui/tooltip";
+import { isGenerationActive } from "@/lib/generation/snapshots";
+import { GenerationIndicator } from "../generation-indicator";
+import type {
+	GenerationState,
+	PlaceholderProps,
+	PreviewOverlays,
+} from "./status";
+
+/**
+ * Vertical offset is inherited from `--cancel-offset`, so a placeholder whose
+ * top-right corner is already occupied moves the button by setting that token
+ * on its own container instead of threading a class down the preview tree.
+ */
+function CancelButton({ onClick }: { onClick: () => void }) {
+	return (
+		<SimpleTooltip label="Cancel generation">
+			<IconButton
+				ariaLabel="Cancel generation"
+				size="header"
+				className="absolute right-2 top-[var(--cancel-offset,0.5rem)] z-10 rounded-full bg-muted opacity-0 transition-opacity hover:bg-muted group-hover:opacity-100 focus-visible:opacity-100"
+				onClick={onClick}
+			>
+				<XIcon className="w-3 h-3 text-foreground" aria-hidden="true" />
+			</IconButton>
+		</SimpleTooltip>
+	);
+}
+
+/**
+ * Sits above every other overlay so its controls stay clickable through an
+ * error message, and wraps rather than overflows on a narrow card.
+ */
+export function PreviewChrome({ topRight }: PreviewOverlays) {
+	return (
+		<div className="absolute right-2 top-2 z-30 flex flex-wrap items-center justify-end gap-1.5 empty:hidden">
+			{topRight}
+		</div>
+	);
+}
+
+export function ResultOverlay({ status, startedAt }: GenerationState) {
+	if (!isGenerationActive(status)) return null;
+	return (
+		<GenerationIndicator
+			status={status}
+			startedAt={startedAt}
+			className="absolute top-2 left-2 z-10"
+		/>
+	);
+}
+
+export function ErrorMessage({ message }: { message: string }) {
+	const [copied, setCopied] = useState(false);
+	const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+	useEffect(
+		() => () => {
+			if (timerRef.current) clearTimeout(timerRef.current);
+		},
+		[],
+	);
+	const handleCopy = async () => {
+		try {
+			await navigator.clipboard.writeText(message);
+		} catch (error) {
+			console.error("Failed to copy error message:", error);
+			return;
+		}
+		setCopied(true);
+		if (timerRef.current) clearTimeout(timerRef.current);
+		timerRef.current = setTimeout(() => setCopied(false), 1500);
+	};
+	return (
+		<div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center px-12 py-2">
+			<div className="pointer-events-auto flex max-h-full max-w-full items-start gap-1.5 overflow-auto rounded-lg bg-destructive px-3 py-1.5 shadow-md">
+				<AlertCircle className="mt-px h-3.5 w-3.5 shrink-0 text-destructive-foreground" />
+				<p className="min-w-0 whitespace-pre-wrap break-words text-label leading-snug text-destructive-foreground">
+					{message}
+				</p>
+				<button
+					type="button"
+					onClick={handleCopy}
+					aria-label={copied ? "Copied" : "Copy error message"}
+					className="mt-px shrink-0 rounded text-destructive-foreground transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-border"
+				>
+					{copied ? (
+						<Check className="h-3.5 w-3.5" />
+					) : (
+						<Copy className="h-3.5 w-3.5" />
+					)}
+				</button>
+			</div>
+		</div>
+	);
+}
+
+export function PlaceholderOverlay({
+	status,
+	startedAt,
+	error,
+	onDiscard,
+}: PlaceholderProps) {
+	return (
+		<>
+			{error && <ErrorMessage message={error} />}
+			{isGenerationActive(status) && (
+				<>
+					<div className="absolute top-2 left-2 z-10">
+						<GenerationIndicator status={status} startedAt={startedAt} />
+					</div>
+					<CancelButton onClick={onDiscard} />
+				</>
+			)}
+		</>
+	);
+}

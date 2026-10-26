@@ -1,0 +1,115 @@
+.sortable {
+	display: flex;
+	z-index: 0;
+	outline: none;
+}
+
+.canvas {
+	container-type: inline-size;
+}
+
+@container (max-width: 640px) {
+	.elementRow {
+		flex-direction: column;
+		gap: 8px;
+	}
+
+	.elementDivider {
+		display: none;
+	}
+
+	.elementOutput {
+		min-height: 160px;
+		width: 100%;
+	}
+}
+
+.sortable:focus-visible {
+	border-radius: var(--radius-md);
+	background-color: var(--surface-hover);
+}
+
+/* Skips style recalc and paint for offscreen scenes during a drag. `auto`
+   caches each scene's real height, so the scrollbar settles after first paint.
+   It also clips paint to its box, so it goes on the element dnd-kit transforms:
+   on a static wrapper, a scene shifted into a neighbour's slot is clipped away. */
+.scene {
+	content-visibility: auto;
+	contain-intrinsic-size: auto 600px;
+}
+
+.sortable > div:last-child {
+	flex: 1;
+	min-width: 0;
+	word-wrap: break-word;
+	overflow-wrap: break-word;
+}
+
+.dragOverlay > div:last-child {
+	flex: 1;
+	word-wrap: break-word;
+	overflow-wrap: break-word;
+}
+
+.dragOverlay {
+	display: flex;
+	opacity: 0.95;
+	transform: scale(1.02) rotate(0.5deg);
+	box-shadow:
+		0 20px 40px -12px rgba(0, 0, 0, 0.25),
+		0 8px 16px -4px rgba(0, 0, 0, 0.15),
+		0 0 0 1px var(--border);
+	border-radius: 8px;
+	background: var(--card);
+	transition:
+		opacity 0.2s cubic-bezier(0.4, 0, 0.2, 1),
+		transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+	padding: 4px;
+}
+
+.dragOverlay > .actions {
+	opacity: 1;
+}
+
+.actions {
+	flex: none;
+	display: flex;
+	align-items: center;
+	user-select: none;
+	margin-inline: 4px;
+	opacity: 0;
+	pointer-events: none;
+	transition: opacity 0.15s ease;
+}
+
+@media (max-width: 639px) {
+	.actions {
+		display: none;
+	}
+}
+
+.hoverTarget {
+	display: flex;
+}
+
+.hoverTarget > div:last-child {
+	flex: 1;
+	min-width: 0;
+	word-wrap: break-word;
+	overflow-wrap: break-word;
+}
+
+.hoverTarget:hover > .actions,
+.hoverTarget:focus-within > .actions,
+.hoverTarget.menuOpen > .actions {
+	opacity: 1;
+	pointer-events: auto;
+}
+
+.actions button {
+	border: none;
+}
+
+.dragOverlay :global(.animate-fadeInUp) {
+	animation: none;
+}

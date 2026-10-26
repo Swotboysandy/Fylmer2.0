@@ -1,0 +1,749 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { NextRequest } from "next/server";
+import { POST as postImage } from "@/app/api/v1/image/route";
+
+const mockLLMGenerate = vi.fn();
+const mockLLMStream = vi.fn();
+const mockTTSSearch = vi.fn();
+
+vi.mock("@/lib/api/providers/openslop", () => ({
+	hostedProviderFor: (type: string) =>
+		type === "llm"
+			? {
+					generate: mockLLMGenerate,
+					stream: mockLLMStream,
+					agentModel: (modelId: string) => ({ modelId, maxOutputTokens: 1024 }),
+				}
+			: { search: mockTTSSearch, generate: vi.fn(), poll: vi.fn() },
+}));
+
+const mockCreateJob = vi.fn();
+const mockEnqueueJob = vi.fn();
+const mockUpdateJob = vi.fn();
+const mockGetJob = vi.fn();
+const mockSpentSince = vi.fn();
+vi.mock("@/lib/api/jobs", () => ({
+	spentSince: (...args: unknown[]) => mockSpentSince(...args),
+	createJob: (...args: unknown[]) => mockCreateJob(...args),
+	enqueueJob: (...args: unknown[]) => mockEnqueueJob(...args),
+	updateJob: (...args: unknown[]) => mockUpdateJob(...args),
+	getJob: (...args: unknown[]) => mockGetJob(...args),
+}));
+
+vi.mock("@/lib/api/logger", () => ({
+	logger: { error: vi.fn(), warn: vi.fn() },
+}));
+
+const mockOwnsProject = vi.fn();
+const mockWorkflow = vi.fn();
+vi.mock("@/lib/supabase/server", () => ({
+	createClient: async () => ({
+		rpc: (...args: unknown[]) => mockWorkflow(...args),
+	}),
+}));
+vi.mock("@/lib/api/projects", () => ({
+	ownsProject: (...args: unknown[]) => mockOwnsProject(...args),
+}));
+
+const mockGetUser = vi.fn();
+vi.mock("@/lib/api/auth", () => ({
+	getUser: () => mockGetUser(),
+}));
+
+/** The model each hosted route serves; a body with a prompt names it unless it says otherwise. */
+const HOSTED_MODELS: Record<string, string> = {
+	image: "Seedream 5 Lite",
+	video: "Seedance 2 Fast",
+	music: "Hosted music",
+	sfx: "Hosted sound effects",
+	llm: "Claude Opus 5",
+	tts: "Hosted speech",
+};
+
+function makeRequest(
+	url: string,
+	body?: Record<string, unknown>,
+	method = "POST",
+) {
+	const type = url.split("/")[3] ?? "";
+	const withModel =
+		body && "prompt" in body
+			? { model: HOSTED_MODELS[type], projectId: PROJECT_ID, ...body }
+			: body;
+	return new NextRequest(new URL(url, "http://localhost:3000"), {
+		method,
+		...(withModel ? { body: JSON.stringify(withModel) } : {}),
+	});
+}
+
+type RoutePost = (req: NextRequest) => Promise<Response>;
+
+// Every asset route that accepts `referenceImages` shares the same field
+// contract (see optionalReferenceImages), so its validation coverage is
+// identical. Register the suite once per route instead of duplicating it.
+function referenceImagesSuite(
+	routePath: string,
+	loadPost: () => Promise<{ POST: RoutePost }>,
+) {
+	const post = (body: Record<string, unknown>) =>
+		loadPost().then(({ POST }) =>
+			POST(makeRequest(routePath, { prompt: "a", ...body })),
+		);
+
+	it("accepts requests without referenceImages", async () => {
+		expect((await post({})).status).toBe(200);
+	});
+
+	it("returns 400 for non-array referenceImages", async () => {
+		const res = await post({ referenceImages: "not-an-array" });
+		expect(res.status).toBe(400);
+		expect((await res.json()).error).toContain("expected array");
+	});
+
+	it("returns 400 for invalid referenceImages entry", async () => {
+		const res = await post({ referenceImages: ["not-a-data-uri"] });
+		expect(res.status).toBe(400);
+		expect((await res.json()).error).toContain("data URI or an HTTP");
+	});
+
+	it("accepts valid referenceImages data URIs", async () => {
+		const res = await post({
+			referenceImages: ["data:image/png;base64,iVBORw0KGgo"],
+		});
+		expect(res.status).toBe(200);
+	});
+
+	it("accepts valid referenceImages URLs", async () => {
+		const res = await post({
+			referenceImages: ["https://example.com/image.png"],
+		});
+		expect(res.status).toBe(200);
+	});
+}
+
+const JOB_ID = "00000000-0000-0000-0000-000000000001";
+const PROJECT_ID = "00000000-0000-4000-8000-000000000000";
+
+describe("API routes", () => {
+	beforeEach(() => {
+		vi.stubEnv("FYLMER_STAGING_GENERATION_ENABLED", "1");
+		vi.clearAllMocks();
+		mockGetUser.mockResolvedValue({
+			id: "user-1",
+			created_at: "2026-06-14T09:30:00Z",
+			app_metadata: { api_access: true },
+		});
+		vi.useFakeTimers({ toFake: ["Date"] });
+		vi.setSystemTime(new Date("2026-10-20T00:00:00Z"));
+		mockCreateJob.mockResolvedValue({ id: "job-abc" });
+		mockSpentSince.mockResolvedValue(0);
+		mockEnqueueJob.mockResolvedValue(undefined);
+		mockOwnsProject.mockResolvedValue(true);
+		mockWorkflow.mockResolvedValue({
+			data: {
+				mode: "directed",
+				capUsd: null,
+				bible: true,
+				images: true,
+				videos: false,
+				finalCut: false,
+				imageCount: 1,
+				videoCount: 0,
+			},
+			error: null,
+		});
+	});
+
+	afterEach(() => {
+		vi.unstubAllEnvs();
+		vi.useRealTimers();
+	});
+
+	describe("POST /api/v1/image", () => {
+		it("enqueues a job and returns jobId", async () => {
+			const res = await postImage(
+				makeRequest("/api/v1/image", { prompt: "cat" }),
+			);
+			const json = await res.json();
+
+			expect(res.status).toBe(200);
+			expect(json).toEqual({ jobId: "job-abc", status: "pending" });
+			expect(mockCreateJob).toHaveBeenCalledWith({
+				userId: "user-1",
+				projectId: PROJECT_ID,
+				connectorType: "image",
+				request: expect.objectContaining({ prompt: "cat" }),
+			});
+			expect(mockEnqueueJob).toHaveBeenCalledWith("job-abc");
+		});
+
+		it("reads the account's hosted spend since its period started", async () => {
+			const { POST } = await import("@/app/api/v1/image/route");
+			await POST(makeRequest("/api/v1/image", { prompt: "cat" }));
+
+			const [userId, provider, since] = mockSpentSince.mock.calls[0] ?? [];
+			expect([userId, provider]).toEqual(["user-1", "openslop"]);
+			expect(since).toEqual(new Date("2026-10-14T09:30:00Z"));
+		});
+
+		it("returns 402 once the monthly budget is spent", async () => {
+			mockSpentSince.mockResolvedValue(100.02);
+			const { POST } = await import("@/app/api/v1/image/route");
+			const res = await POST(makeRequest("/api/v1/image", { prompt: "cat" }));
+
+			expect(res.status).toBe(402);
+			expect((await res.json()).error).toMatch(
+				/^You've used your generation budget\. Your credits refresh on November 14\. If you need help, contact your workspace administrator\.$/,
+			);
+			expect(mockCreateJob).not.toHaveBeenCalled();
+		});
+
+		it("admits a job on an account whose budget was raised", async () => {
+			mockSpentSince.mockResolvedValue(100.02);
+			mockGetUser.mockResolvedValue({
+				id: "user-1",
+				created_at: "2026-06-14T09:30:00Z",
+				app_metadata: { api_access: true, monthly_budget_usd: 500 },
+			});
+			const { POST } = await import("@/app/api/v1/image/route");
+			const res = await POST(makeRequest("/api/v1/image", { prompt: "cat" }));
+
+			expect(res.status).toBe(200);
+		});
+
+		it("returns 500 when the account's budget is malformed", async () => {
+			mockGetUser.mockResolvedValue({
+				id: "user-1",
+				created_at: "2026-06-14T09:30:00Z",
+				app_metadata: { api_access: true, monthly_budget_usd: "lots" },
+			});
+			const { POST } = await import("@/app/api/v1/image/route");
+			const res = await POST(makeRequest("/api/v1/image", { prompt: "cat" }));
+
+			expect(res.status).toBe(500);
+			expect(mockCreateJob).not.toHaveBeenCalled();
+		});
+
+		it("persists projectId and strips it from the provider request", async () => {
+			const { POST } = await import("@/app/api/v1/image/route");
+			const res = await POST(
+				makeRequest("/api/v1/image", { prompt: "cat", projectId: PROJECT_ID }),
+			);
+			expect(res.status).toBe(200);
+			expect(mockOwnsProject).toHaveBeenCalledExactlyOnceWith(PROJECT_ID);
+			const [[args]] = mockCreateJob.mock.calls;
+			expect(args.projectId).toBe(PROJECT_ID);
+			expect(args.request).not.toHaveProperty("projectId");
+		});
+
+		it("returns 404 and queues nothing for a project the caller cannot see", async () => {
+			mockOwnsProject.mockResolvedValue(false);
+			const { POST } = await import("@/app/api/v1/image/route");
+			const res = await POST(
+				makeRequest("/api/v1/image", { prompt: "cat", projectId: PROJECT_ID }),
+			);
+			expect(res.status).toBe(404);
+			expect(mockCreateJob).not.toHaveBeenCalled();
+		});
+
+		it("skips the ownership lookup when the job names no project", async () => {
+			const { POST } = await import("@/app/api/v1/image/route");
+			const response = await POST(
+				makeRequest("/api/v1/image", { prompt: "cat", projectId: undefined }),
+			);
+			expect(response.status).toBe(400);
+			expect(mockOwnsProject).not.toHaveBeenCalled();
+		});
+
+		it("returns 400 for invalid projectId", async () => {
+			const { POST } = await import("@/app/api/v1/image/route");
+			const res = await POST(
+				makeRequest("/api/v1/image", {
+					prompt: "cat",
+					projectId: "not-a-uuid",
+				}),
+			);
+			expect(res.status).toBe(400);
+		});
+
+		it("returns 401 when the user is not authenticated", async () => {
+			mockGetUser.mockResolvedValue(null);
+			const { POST } = await import("@/app/api/v1/image/route");
+
+			const res = await POST(makeRequest("/api/v1/image", { prompt: "cat" }));
+			expect(res.status).toBe(401);
+			expect(mockCreateJob).not.toHaveBeenCalled();
+		});
+
+		it("returns 400 when prompt missing", async () => {
+			const { POST } = await import("@/app/api/v1/image/route");
+			const res = await POST(makeRequest("/api/v1/image", {}));
+			expect(res.status).toBe(400);
+		});
+
+		it("returns 400 for invalid model", async () => {
+			const { POST } = await import("@/app/api/v1/image/route");
+			const res = await POST(
+				makeRequest("/api/v1/image", { prompt: "cat", model: "bad-model" }),
+			);
+			expect(res.status).toBe(400);
+			expect((await res.json()).error).toContain("Invalid model");
+		});
+
+		it("returns 500 when createJob fails", async () => {
+			mockCreateJob.mockRejectedValue(new Error("db down"));
+			const { POST } = await import("@/app/api/v1/image/route");
+			const res = await POST(makeRequest("/api/v1/image", { prompt: "cat" }));
+			expect(res.status).toBe(500);
+		});
+
+		it("fails the job when it cannot be queued", async () => {
+			mockEnqueueJob.mockRejectedValue(new Error("queue unavailable"));
+			const { POST } = await import("@/app/api/v1/image/route");
+			const res = await POST(makeRequest("/api/v1/image", { prompt: "cat" }));
+			expect(res.status).toBe(500);
+			expect(mockUpdateJob).toHaveBeenCalledExactlyOnceWith("job-abc", {
+				status: "failed",
+				error: expect.stringContaining("queue unavailable"),
+			});
+		});
+
+		referenceImagesSuite(
+			"/api/v1/image",
+			() => import("@/app/api/v1/image/route"),
+		);
+
+		it("returns 400 for blank dimension strings", async () => {
+			const { POST } = await import("@/app/api/v1/image/route");
+			const res = await POST(
+				makeRequest("/api/v1/image", { prompt: "cat", width: "   " }),
+			);
+
+			expect(res.status).toBe(400);
+			expect((await res.json()).error).toContain("must be a positive number");
+			expect(mockCreateJob).not.toHaveBeenCalled();
+		});
+	});
+
+	describe("POST /api/v1/video", () => {
+		it("enqueues a video job", async () => {
+			const { POST } = await import("@/app/api/v1/video/route");
+			const res = await POST(
+				makeRequest("/api/v1/video", { prompt: "sunset" }),
+			);
+			expect(res.status).toBe(200);
+			expect((await res.json()).jobId).toBe("job-abc");
+			expect(mockCreateJob).toHaveBeenCalledWith(
+				expect.objectContaining({ connectorType: "video" }),
+			);
+			expect(mockEnqueueJob).toHaveBeenCalledWith("job-abc");
+		});
+
+		referenceImagesSuite(
+			"/api/v1/video",
+			() => import("@/app/api/v1/video/route"),
+		);
+
+		it("returns 400 for missing prompt", async () => {
+			const { POST } = await import("@/app/api/v1/video/route");
+			const res = await POST(makeRequest("/api/v1/video", {}));
+			expect(res.status).toBe(400);
+		});
+
+		it("coerces string duration/width/height into numbers", async () => {
+			const { POST } = await import("@/app/api/v1/video/route");
+			const res = await POST(
+				makeRequest("/api/v1/video", {
+					prompt: "sunset",
+					duration: "5",
+					width: "1280",
+					height: "720",
+				}),
+			);
+			expect(res.status).toBe(200);
+			expect(mockCreateJob).toHaveBeenCalledWith(
+				expect.objectContaining({
+					request: expect.objectContaining({
+						duration: 5,
+						width: 1280,
+						height: 720,
+					}),
+				}),
+			);
+		});
+
+		it("returns 400 for non-numeric duration string", async () => {
+			const { POST } = await import("@/app/api/v1/video/route");
+			const res = await POST(
+				makeRequest("/api/v1/video", { prompt: "x", duration: "abc" }),
+			);
+			expect(res.status).toBe(400);
+		});
+
+		it("returns 400 for blank duration strings", async () => {
+			const { POST } = await import("@/app/api/v1/video/route");
+			const res = await POST(
+				makeRequest("/api/v1/video", { prompt: "x", duration: "" }),
+			);
+
+			expect(res.status).toBe(400);
+			expect((await res.json()).error).toContain("must be a positive number");
+			expect(mockCreateJob).not.toHaveBeenCalled();
+		});
+
+		it("returns 500 when createJob fails", async () => {
+			mockCreateJob.mockRejectedValue(new Error("db down"));
+			const { POST } = await import("@/app/api/v1/video/route");
+			const res = await POST(
+				makeRequest("/api/v1/video", { prompt: "sunset" }),
+			);
+			expect(res.status).toBe(500);
+		});
+	});
+
+	describe("GET /api/v1/video/[jobId]", () => {
+		it("returns job status", async () => {
+			const { GET } = await import("@/app/api/v1/video/[jobId]/route");
+			mockGetJob.mockResolvedValue({
+				id: JOB_ID,
+				status: "completed",
+				result: { id: "x", provider: "p", result: { video: "v.mp4" } },
+				error: null,
+			});
+
+			const req = makeRequest(`/api/v1/video/${JOB_ID}`, undefined, "GET");
+			const res = await GET(req, {
+				params: Promise.resolve({ jobId: JOB_ID }),
+			});
+			const json = await res.json();
+
+			expect(res.status).toBe(200);
+			expect(json.status).toBe("completed");
+			expect(json.result.result.video).toBe("v.mp4");
+		});
+
+		it("returns 404 when job is missing", async () => {
+			const { GET } = await import("@/app/api/v1/video/[jobId]/route");
+			mockGetJob.mockResolvedValue(null);
+
+			const req = makeRequest(`/api/v1/video/${JOB_ID}`, undefined, "GET");
+			const res = await GET(req, {
+				params: Promise.resolve({ jobId: JOB_ID }),
+			});
+			expect(res.status).toBe(404);
+		});
+
+		it("returns 500 on lookup error", async () => {
+			const { GET } = await import("@/app/api/v1/video/[jobId]/route");
+			mockGetJob.mockRejectedValue(new Error("db error"));
+
+			const req = makeRequest(`/api/v1/video/${JOB_ID}`, undefined, "GET");
+			const res = await GET(req, {
+				params: Promise.resolve({ jobId: JOB_ID }),
+			});
+			expect(res.status).toBe(500);
+		});
+	});
+
+	describe("POST /api/v1/music", () => {
+		it("enqueues a music job", async () => {
+			const { POST } = await import("@/app/api/v1/music/route");
+			const res = await POST(makeRequest("/api/v1/music", { prompt: "jazz" }));
+			const json = await res.json();
+			expect(res.status).toBe(200);
+			expect(json.jobId).toBe("job-abc");
+			expect(mockCreateJob).toHaveBeenCalledWith(
+				expect.objectContaining({ connectorType: "music" }),
+			);
+			expect(mockEnqueueJob).toHaveBeenCalledWith("job-abc");
+		});
+
+		it("returns 400 for missing prompt", async () => {
+			const { POST } = await import("@/app/api/v1/music/route");
+			const res = await POST(makeRequest("/api/v1/music", {}));
+			expect(res.status).toBe(400);
+		});
+	});
+
+	describe("POST /api/v1/sfx", () => {
+		it("enqueues a sfx job", async () => {
+			const { POST } = await import("@/app/api/v1/sfx/route");
+			const res = await POST(
+				makeRequest("/api/v1/sfx", { prompt: "explosion" }),
+			);
+			const json = await res.json();
+			expect(res.status).toBe(200);
+			expect(json.jobId).toBe("job-abc");
+			expect(mockCreateJob).toHaveBeenCalledWith(
+				expect.objectContaining({ connectorType: "sfx" }),
+			);
+			expect(mockEnqueueJob).toHaveBeenCalledWith("job-abc");
+		});
+
+		it("returns 400 for invalid model", async () => {
+			const { POST } = await import("@/app/api/v1/sfx/route");
+			const res = await POST(
+				makeRequest("/api/v1/sfx", { prompt: "boom", model: "invalid" }),
+			);
+			expect(res.status).toBe(400);
+		});
+	});
+
+	describe("POST /api/v1/llm", () => {
+		it("rejects text generation without a saved project", async () => {
+			const { POST } = await import("@/app/api/v1/llm/route");
+			const response = await POST(
+				makeRequest("/api/v1/llm", { prompt: "hi", projectId: undefined }),
+			);
+			expect(response.status).toBe(400);
+			expect(mockLLMGenerate).not.toHaveBeenCalled();
+			expect(mockLLMStream).not.toHaveBeenCalled();
+		});
+
+		it("rejects text generation for another owner's project", async () => {
+			mockOwnsProject.mockResolvedValue(false);
+			const { POST } = await import("@/app/api/v1/llm/route");
+			const response = await POST(makeRequest("/api/v1/llm", { prompt: "hi" }));
+			expect(response.status).toBe(404);
+			expect(mockLLMGenerate).not.toHaveBeenCalled();
+			expect(mockLLMStream).not.toHaveBeenCalled();
+		});
+
+		it("refuses autonomous text generation without a project cap", async () => {
+			mockWorkflow.mockResolvedValue({
+				data: {
+					mode: "autonomous",
+					capUsd: null,
+					bible: true,
+					images: true,
+					videos: false,
+					finalCut: false,
+					imageCount: 1,
+					videoCount: 0,
+				},
+				error: null,
+			});
+			const { POST } = await import("@/app/api/v1/llm/route");
+			const response = await POST(makeRequest("/api/v1/llm", { prompt: "hi" }));
+			expect(response.status).toBe(409);
+			expect((await response.json()).error).toContain("spending cap");
+			expect(mockLLMGenerate).not.toHaveBeenCalled();
+			expect(mockLLMStream).not.toHaveBeenCalled();
+			expect(mockCreateJob).not.toHaveBeenCalled();
+		});
+
+		it("returns generate result", async () => {
+			const { POST } = await import("@/app/api/v1/llm/route");
+			mockLLMGenerate.mockResolvedValue({
+				output: {
+					text: "Hello",
+					model: "claude-sonnet-4-5-20250929",
+					usage: { inputTokens: 5, outputTokens: 3 },
+				},
+				costUsd: 0.0001,
+			});
+
+			const res = await POST(makeRequest("/api/v1/llm", { prompt: "hi" }));
+			expect(res.status).toBe(200);
+			expect((await res.json()).text).toBe("Hello");
+		});
+
+		// The name survives the boundary; this route is where it becomes the id
+		// Anthropic's own API takes.
+		it("forwards the vendor's id for the model it was asked for", async () => {
+			const { POST } = await import("@/app/api/v1/llm/route");
+			mockLLMGenerate.mockResolvedValue({
+				output: { text: "Hello", model: "x" },
+				costUsd: 0,
+			});
+
+			await POST(
+				makeRequest("/api/v1/llm", { prompt: "hi", model: "Claude Opus 5" }),
+			);
+
+			expect(mockLLMGenerate).toHaveBeenCalledWith(
+				expect.objectContaining({ model: "claude-opus-5" }),
+			);
+		});
+
+		it("returns SSE stream when stream=true", async () => {
+			const { POST } = await import("@/app/api/v1/llm/route");
+			mockLLMStream.mockReturnValue(
+				(async function* () {
+					yield { text: "Hi", done: false };
+					yield { text: "", done: true };
+					return 0.003;
+				})(),
+			);
+
+			const res = await POST(
+				makeRequest("/api/v1/llm", { prompt: "hi", stream: true }),
+			);
+
+			expect(res.headers.get("content-type")).toBe("text/event-stream");
+			const text = await res.text();
+			expect(text).toContain("data:");
+			expect(text).toContain('"text":"Hi"');
+			expect(mockCreateJob).toHaveBeenCalledExactlyOnceWith({
+				userId: "user-1",
+				connectorType: "llm",
+				request: { provider: "openslop", model: "Claude Opus 5" },
+				status: "completed",
+				costUsd: 0.003,
+			});
+		});
+
+		it("records what the call cost", async () => {
+			const { POST } = await import("@/app/api/v1/llm/route");
+			mockLLMGenerate.mockResolvedValue({
+				output: { text: "Hello", model: "x" },
+				costUsd: 0.02,
+			});
+
+			await POST(makeRequest("/api/v1/llm", { prompt: "hi" }));
+
+			expect(mockCreateJob).toHaveBeenCalledExactlyOnceWith({
+				userId: "user-1",
+				connectorType: "llm",
+				request: { provider: "openslop", model: "Claude Opus 5" },
+				status: "completed",
+				costUsd: 0.02,
+			});
+		});
+
+		it("returns 402 without calling the model once the budget is spent", async () => {
+			mockSpentSince.mockResolvedValue(100);
+			const { POST } = await import("@/app/api/v1/llm/route");
+			const res = await POST(makeRequest("/api/v1/llm", { prompt: "hi" }));
+
+			expect(res.status).toBe(402);
+			expect(mockLLMGenerate).not.toHaveBeenCalled();
+		});
+
+		it("records nothing when the stream breaks", async () => {
+			const { POST } = await import("@/app/api/v1/llm/route");
+			mockLLMStream.mockReturnValue(
+				(async function* () {
+					yield { text: "Hi", done: false };
+					throw new Error("overloaded");
+				})(),
+			);
+
+			const res = await POST(
+				makeRequest("/api/v1/llm", { prompt: "hi", stream: true }),
+			);
+			await res.text().catch(() => undefined);
+
+			expect(mockCreateJob).not.toHaveBeenCalled();
+		});
+
+		it("returns 400 for missing prompt", async () => {
+			const { POST } = await import("@/app/api/v1/llm/route");
+			const res = await POST(makeRequest("/api/v1/llm", {}));
+			expect(res.status).toBe(400);
+		});
+	});
+
+	describe("POST /api/v1/agent", () => {
+		const turn = () =>
+			import("@/app/api/v1/agent/route").then(({ POST }) =>
+				POST(
+					makeRequest("/api/v1/agent", {
+						model: "Claude Opus 5",
+						projectId: PROJECT_ID,
+						message: {
+							id: "m1",
+							role: "user",
+							parts: [{ type: "text", text: "hi" }],
+						},
+					}),
+				),
+			);
+
+		it("returns 402 before the turn starts once the budget is spent", async () => {
+			mockSpentSince.mockResolvedValue(120);
+
+			expect((await turn()).status).toBe(402);
+		});
+
+		it("returns 404 before the turn starts for a project the caller cannot see", async () => {
+			mockOwnsProject.mockResolvedValue(false);
+
+			expect((await turn()).status).toBe(404);
+			expect(mockOwnsProject).toHaveBeenCalledExactlyOnceWith(PROJECT_ID);
+			expect(mockLLMStream).not.toHaveBeenCalled();
+		});
+	});
+
+	describe("POST /api/v1/tts", () => {
+		it("enqueues a tts job", async () => {
+			const { POST } = await import("@/app/api/v1/tts/route");
+			const res = await POST(
+				makeRequest("/api/v1/tts", { prompt: "hi", voiceId: "v1" }),
+			);
+			const json = await res.json();
+			expect(res.status).toBe(200);
+			expect(json.jobId).toBe("job-abc");
+			expect(mockCreateJob).toHaveBeenCalledWith(
+				expect.objectContaining({ connectorType: "tts" }),
+			);
+			expect(mockEnqueueJob).toHaveBeenCalledWith("job-abc");
+		});
+
+		it("returns 400 when voiceId missing", async () => {
+			const { POST } = await import("@/app/api/v1/tts/route");
+			const res = await POST(makeRequest("/api/v1/tts", { prompt: "hello" }));
+			expect(res.status).toBe(400);
+			expect((await res.json()).error).toContain("voiceId");
+		});
+
+		it("returns 400 when prompt missing", async () => {
+			const { POST } = await import("@/app/api/v1/tts/route");
+			const res = await POST(makeRequest("/api/v1/tts", { voiceId: "v1" }));
+			expect(res.status).toBe(400);
+		});
+	});
+
+	describe("GET /api/v1/tts/voices", () => {
+		it("returns voices list", async () => {
+			const { GET } = await import("@/app/api/v1/tts/voices/route");
+			mockTTSSearch.mockResolvedValue([
+				{ id: "v1", name: "Voice 1", language: "en" },
+			]);
+
+			const req = makeRequest(
+				"/api/v1/tts/voices?query=english&model=Hosted%20speech",
+				undefined,
+				"GET",
+			);
+			const res = await GET(req);
+			const json = await res.json();
+
+			expect(res.status).toBe(200);
+			expect(json.voices).toHaveLength(1);
+			expect(json.voices[0].name).toBe("Voice 1");
+		});
+
+		// The search names its model like a generation does, so the route knows whose key to read.
+		it("returns 400 without a model", async () => {
+			const { GET } = await import("@/app/api/v1/tts/voices/route");
+
+			const req = makeRequest("/api/v1/tts/voices", undefined, "GET");
+			expect((await GET(req)).status).toBe(400);
+			expect(mockTTSSearch).not.toHaveBeenCalled();
+		});
+
+		it("returns 500 on error", async () => {
+			const { GET } = await import("@/app/api/v1/tts/voices/route");
+			mockTTSSearch.mockRejectedValue(new Error("api down"));
+
+			const req = makeRequest(
+				"/api/v1/tts/voices?model=Hosted%20speech",
+				undefined,
+				"GET",
+			);
+			const res = await GET(req);
+			expect(res.status).toBe(500);
+		});
+	});
+});

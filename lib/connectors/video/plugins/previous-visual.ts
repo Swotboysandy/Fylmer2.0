@@ -1,0 +1,78 @@
+import { previousVisual } from "@/lib/canvas/scenes";
+import { isToggleOn } from "@/lib/canvas/types";
+import type { AssetResult, ConnectorPlugin } from "@/lib/connectors/types";
+import type { Dependency } from "@/lib/generation/declare";
+import { captureFrames } from "@/lib/connectors/video/capture-frames";
+import {
+	CONTINUITY_ATTR,
+	CONTINUITY_FRAMES,
+	type FrameKey,
+	NO_FRAME,
+	PREVIOUS_VISUAL,
+	START_FRAME,
+	START_FRAME_ATTR,
+} from "../start-frame";
+
+export type ParamsWithPreviousVisual = {
+	prompt: string;
+	frameImage?: string;
+	continuityFrames?: string[];
+	[START_FRAME_ATTR]?: string;
+	[CONTINUITY_ATTR]?: string;
+};
+
+/** No result means nothing came before the video. */
+async function previousPictures(
+	source: AssetResult | undefined,
+	frames: readonly FrameKey[],
+	capture: typeof captureFrames,
+): Promise<string[]> {
+	if (!source) return [];
+	if (source.videoUrl) return capture(source.videoUrl, frames);
+	if (source.imageUrl) return [source.imageUrl];
+	throw new Error("The previous visual generated no picture to hand on");
+}
+
+const PREVIOUS_VISUAL_LABEL = "the previous visual";
+
+/** A start frame by URL is only an input; opening on or linking to the previous visual depends on it. */
+const previousWhenLinked: Dependency = (
+	{ id, generationAttributes: attrs = {} },
+	{ canvas },
+) => ({
+	[PREVIOUS_VISUAL_LABEL]:
+		attrs[START_FRAME_ATTR] === PREVIOUS_VISUAL ||
+		isToggleOn(attrs[CONTINUITY_ATTR])
+			? previousVisual(canvas, id)
+			: undefined,
+});
+
+/** Opening on the previous visual takes its end as the start frame; linking carries on from its beginning and middle. */
+export function createPreviousVisualPlugin(
+	capture: typeof captureFrames = captureFrames,
+): ConnectorPlugin<ParamsWithPreviousVisual> {
+	return {
+		name: "previous-visual",
+		dependencies: [previousWhenLinked],
+		async beforeGenerate(
+			{
+				[START_FRAME_ATTR]: frame = NO_FRAME,
+				[CONTINUITY_ATTR]: continuity,
+				...params
+			},
+			ctx,
+		) {
+			const source = ctx.dependencies?.[PREVIOUS_VISUAL_LABEL];
+			const [frameImage] =
+				frame === PREVIOUS_VISUAL
+					? await previousPictures(source, [START_FRAME], capture)
+					: URL.canParse(frame)
+						? [frame]
+						: [];
+			const continuityFrames = isToggleOn(continuity)
+				? await previousPictures(source, CONTINUITY_FRAMES, capture)
+				: [];
+			return { ...params, ...(frameImage && { frameImage }), continuityFrames };
+		},
+	};
+}

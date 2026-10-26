@@ -1,0 +1,65 @@
+import { notFound, redirect } from "next/navigation";
+import { z } from "zod";
+import { loadTranscript } from "@/lib/api/conversations";
+import { listProviderKeys } from "@/lib/api/provider-keys";
+import {
+	SAVED_PROJECT_COLUMNS,
+	parseSavedProject,
+} from "@/lib/project/saved-project";
+import { createClient } from "@/lib/supabase/server";
+import { AccountSchema } from "@/lib/user/account";
+import ProjectEditor from "./project-editor";
+
+export default async function ProjectPage({
+	params,
+}: {
+	params: Promise<{ id: string }>;
+}) {
+	const { id } = await params;
+	// A malformed id makes Postgres throw on the cast; guid() matches every shape it accepts.
+	if (!z.guid().safeParse(id).success) notFound();
+
+	const supabase = await createClient();
+	// Safe to run concurrently: row access is enforced by RLS, not by this user read.
+	const [
+		{
+			data: { user },
+		},
+		{ data: project, error },
+	] = await Promise.all([
+		supabase.auth.getUser(),
+		supabase
+			.from("projects")
+			.select(SAVED_PROJECT_COLUMNS)
+			.eq("id", id)
+			.maybeSingle(),
+	]);
+
+	if (!user) redirect("/");
+	if (error) throw error;
+	if (!project) notFound();
+
+	const [providerKeys, transcript, { data: archive, error: archiveError }] =
+		await Promise.all([
+			listProviderKeys(user),
+			loadTranscript(id, user.id),
+			supabase
+				.from("legacy_project_archives")
+				.select("project_id")
+				.eq("project_id", id)
+				.maybeSingle(),
+		]);
+	if (archiveError) throw archiveError;
+
+	return (
+		<ProjectEditor
+			key={id}
+			projectId={id}
+			initial={parseSavedProject(project)}
+			initialTranscript={transcript}
+			account={AccountSchema.parse(user)}
+			providerKeys={providerKeys}
+			legacyArchive={Boolean(archive)}
+		/>
+	);
+}

@@ -1,0 +1,38 @@
+"use client";
+
+import { useState } from "react";
+import AuthForm from "../components/auth-form";
+import { AuthFooterLink } from "../components/auth-footer-link";
+import { Input } from "@/components/ui/input";
+
+export default function SignupForm() {
+	const [fullName, setFullName] = useState("");
+	return (
+		<AuthForm
+			heading="Sign up"
+			subtitle="Create your account to start using Fylmer"
+			submitLabel="Send signup link"
+			sentKind="sign-up"
+			otpData={{ full_name: fullName }}
+			footer={
+				<AuthFooterLink
+					prompt="Already have an account?"
+					href="/login"
+					label="Login"
+				/>
+			}
+		>
+			<Input
+				type="text"
+				name="fullName"
+				autoComplete="name"
+				aria-label="Full name"
+				placeholder="Full Name"
+				value={fullName}
+				onChange={(event) => setFullName(event.target.value)}
+				className="h-11 rounded-xl"
+				required
+			/>
+		</AuthForm>
+	);
+}

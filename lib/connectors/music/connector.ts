@@ -1,0 +1,26 @@
+import { HttpAssetGateway } from "@/lib/gateway/http";
+import { BaseAssetConnector } from "../asset-base";
+import type { AttributeSchema } from "../attributes/schema";
+import { MUSIC_ATTRIBUTES } from "./attributes";
+import type {
+	AssetResult,
+	MusicGenerateParams,
+	ResolvedConnectorConfig,
+	ModelRef,
+} from "../types";
+
+export class HttpMusicConnector extends BaseAssetConnector<
+	MusicGenerateParams,
+	AssetResult
+> {
+	readonly type = "music" as const;
+	readonly assetKey = "audio" as const;
+
+	constructor(config: ResolvedConnectorConfig) {
+		super(new HttpAssetGateway(config.model, "music"), config);
+	}
+
+	static attributesFor(_model: ModelRef): AttributeSchema {
+		return MUSIC_ATTRIBUTES;
+	}
+}

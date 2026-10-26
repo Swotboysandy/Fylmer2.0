@@ -1,0 +1,42 @@
+node_modules
+.next
+out
+dist
+build
+.env
+.env*
+!.env.example
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+.DS_Store
+Thumbs.db
+artifacts
+.codex
+.claude
+data/*.sqlite
+data/*.sqlite-shm
+data/*.sqlite-wal
+data/*.sqlite-journal
+data/oss/
+
+# Scratch scripts + build artifacts (kept local, never committed)
+.tmp_*
+.scratch/
+tsconfig.tsbuildinfo
+
+# Cloned reference repo — research only, not part of the app
+Research/dramaclaw/
+
+# Isolated hackathon runtime and private material
+.env.*
+!.env.example
+.secrets/
+*.pem
+*.key
+*.sqlite*
+test-results/
+playwright-report/
+coverage/
+.vercel/

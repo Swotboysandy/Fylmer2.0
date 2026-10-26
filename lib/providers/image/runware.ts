@@ -1,0 +1,103 @@
+import type { ImageGenerateParams } from "@/lib/connectors/types";
+import type { BundleFile } from "@/lib/api/asset-bundle";
+import {
+	DEFAULT_IMAGE_FORMAT,
+	IMAGE_MIME_TYPES,
+	type ImageFormat,
+} from "@/lib/connectors/image/enums";
+import { BaseProvider, type ProviderJobContext, type RawResult } from "../base";
+import { renderCharacterRefs } from "@/lib/connectors/character-refs";
+import { characterAvatars } from "@/lib/connectors/characters";
+import { validateRunwareKey, withRunware } from "../runware";
+import type { VendorParams } from "@/lib/connectors/models";
+import type { ImageProvider } from "../types";
+
+type RawImageResult = { data: string; format: ImageFormat } & RawResult;
+
+const RUNWARE_FORMATS = { jpg: "JPG", png: "PNG", webp: "WEBP" } as const;
+
+const DEFAULT_SIZE = { width: 2848, height: 1600 };
+
+export class RunwareImage
+	extends BaseProvider<VendorParams<ImageGenerateParams>, RawImageResult>
+	implements ImageProvider
+{
+	protected readonly blobConfig = { type: "image", provider: "runware" };
+	private apiKey: string;
+
+	constructor(apiKey: string) {
+		super();
+		this.apiKey = apiKey;
+	}
+
+	async validate() {
+		return validateRunwareKey(this.apiKey);
+	}
+
+	protected toFiles(result: RawImageResult): BundleFile[] {
+		return [
+			{
+				key: "image",
+				filename: `output.${result.format}`,
+				data: Buffer.from(result.data, "base64"),
+				contentType: IMAGE_MIME_TYPES[result.format],
+			},
+		];
+	}
+
+	protected async _generate(
+		params: VendorParams<ImageGenerateParams>,
+		context?: ProviderJobContext,
+	) {
+		const format = params.format ?? DEFAULT_IMAGE_FORMAT;
+		const referenceImages = [
+			...characterAvatars(params.characterAssets ?? []),
+			...(params.referenceImages ?? []),
+		];
+		return withRunware(
+			this.apiKey,
+			async (runware) => {
+				const results = await runware.imageInference({
+					positivePrompt: renderCharacterRefs(params.prompt),
+					model: params.model,
+					width: params.width ?? DEFAULT_SIZE.width,
+					height: params.height ?? DEFAULT_SIZE.height,
+					outputType: "base64Data",
+					outputFormat: RUNWARE_FORMATS[format],
+					numberResults: 1,
+					retry: 0,
+					...(params.model === "bytedance:seedream@5.0-lite" && {
+						settings: { maxSequentialImages: 1 },
+					}),
+					includeCost: true,
+					...(context && { taskUUID: context.jobId }),
+					...(referenceImages.length > 0 && { referenceImages }),
+				});
+
+				const image = results?.[0];
+				if (!image?.imageBase64Data) throw new Error("No image data returned");
+				if (results?.length !== 1)
+					throw new Error(
+						"Unexpected image count returned. Provider billing needs review before retrying.",
+					);
+				if (context && image.taskUUID !== context.jobId)
+					throw new Error(
+						"Image response did not match the reserved job. Provider billing needs review.",
+					);
+				if (image.cost === undefined) throw new Error("No image cost returned");
+				if (!Number.isFinite(image.cost) || image.cost < 0)
+					throw new Error(
+						"Invalid image cost returned. Provider billing needs review before retrying.",
+					);
+
+				return {
+					data: image.imageBase64Data,
+					format,
+					costUsd: image.cost,
+					...(context && { metadata: { providerTaskId: context.jobId } }),
+				};
+			},
+			0,
+		);
+	}
+}

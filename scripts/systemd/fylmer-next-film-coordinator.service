@@ -1,0 +1,24 @@
+[Unit]
+Description=Fylmer isolated staging film coordinator
+After=network.target fylmer-next-staging.service
+
+[Service]
+Type=simple
+User=claudebot
+WorkingDirectory=/home/claudebot/fylmer-next-staging
+EnvironmentFile=/home/claudebot/fylmer-next-staging/.env.local
+EnvironmentFile=/home/claudebot/fylmer-next-staging/.env.film-coordinator
+ExecStart=/usr/bin/node scripts/film-coordinator-service.mjs
+Restart=no
+TimeoutStopSec=20
+KillMode=control-group
+MemoryMax=256M
+CPUQuota=25%
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+
+[Install]
+WantedBy=multi-user.target

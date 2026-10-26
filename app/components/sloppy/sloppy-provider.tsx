@@ -1,0 +1,141 @@
+"use client";
+
+import { useMemo, useRef } from "react";
+import type { ReactNode } from "react";
+import {
+	DefaultChatTransport,
+	lastAssistantMessageIsCompleteWithToolCalls,
+} from "ai";
+import { useChat } from "@ai-sdk/react";
+import { agentPathFor } from "@/lib/agent/client";
+import type { ModelRef } from "@/lib/connectors/types";
+import { useDefaultModels } from "@/lib/connectors/use-default-models";
+import { hasPendingToolCall } from "@/lib/agent/messages";
+import { sloppyMetadataSchema, type SloppyMessage } from "@/lib/agent/types";
+import { DRAFTING_TOOLS, type AgentToolName } from "@/lib/agent/tools/registry";
+import { askUser } from "@/lib/agent/tools/ask-user";
+import { useAgentTools } from "@/lib/agent/tools/use-agent-tools";
+import { createRequiredContext } from "@/lib/components/create-required-context";
+import {
+	useProjectId,
+	useInitialTranscript,
+} from "@/lib/project/project-provider";
+import { toastError } from "@/lib/toast-error";
+
+type SloppyControl = {
+	send: (message: string) => void;
+	answer: (toolCallId: string, answers: string[], skipped: boolean) => void;
+	stop: () => void;
+	loading: boolean;
+	writingScript: boolean;
+};
+
+// Split by update frequency: only the transcript changes per streamed token.
+const [SloppyMessagesContext, useSloppyMessages] =
+	createRequiredContext<SloppyMessage[]>("SloppyProvider");
+const [SloppyControlContext, useSloppy] =
+	createRequiredContext<SloppyControl>("SloppyProvider");
+
+export { useSloppyMessages, useSloppy };
+
+/**
+ * The ReAct loop. A step ends at a tool call, the editor runs it against the
+ * canvas, and the result goes straight back as the next step, until the model
+ * answers with text instead of another call.
+ */
+export function SloppyProvider({ children }: { children: ReactNode }) {
+	const projectId = useProjectId();
+	const initialTranscript = useInitialTranscript();
+	const runTool = useAgentTools();
+	const model = useDefaultModels().llm;
+	const turnModel = useRef<ModelRef>(undefined);
+	// Stopping should also cancel the tool call in flight
+	const turn = useRef<AbortController>(undefined);
+
+	const { messages, sendMessage, stop, status, addToolOutput } =
+		useChat<SloppyMessage>({
+			messages: initialTranscript,
+			messageMetadataSchema: sloppyMetadataSchema,
+			// eslint-disable-next-line react-hooks/refs -- the SDK calls this per request, not per render
+			transport: new DefaultChatTransport<SloppyMessage>({
+				prepareSendMessagesRequest: ({ messages, body }) => {
+					const picked = turnModel.current ?? model;
+					return {
+						api: agentPathFor(picked),
+						body: {
+							...body,
+							projectId,
+							message: messages.at(-1),
+							...picked,
+						},
+					};
+				},
+			}),
+			sendAutomaticallyWhen: (options) =>
+				!turn.current?.signal.aborted &&
+				lastAssistantMessageIsCompleteWithToolCalls(options),
+			onToolCall: async ({ toolCall }) => {
+				if (toolCall.toolName === "ask_user") {
+					const parsed = askUser.input.safeParse(toolCall.input);
+					if (!parsed.success) {
+						addToolOutput({
+							tool: "ask_user",
+							toolCallId: toolCall.toolCallId,
+							state: "output-error",
+							errorText:
+								"Fylmer could not display that question. Please ask it again.",
+						});
+					}
+					return;
+				}
+				const outcome = await runTool(toolCall, turn.current?.signal);
+				const call = {
+					tool: toolCall.toolName as AgentToolName,
+					toolCallId: toolCall.toolCallId,
+				};
+				addToolOutput(
+					outcome.ok
+						? { ...call, output: outcome.output }
+						: { ...call, state: "output-error", errorText: outcome.errorText },
+				);
+			},
+			onError: (error) =>
+				toastError(error, "Fylmer Assistant could not finish that"),
+			throttle: 50,
+		});
+
+	const working =
+		status === "submitted" ||
+		status === "streaming" ||
+		hasPendingToolCall(messages);
+	const writingScript = hasPendingToolCall(messages, DRAFTING_TOOLS);
+	const control = useMemo<SloppyControl>(
+		() => ({
+			send: (message) => {
+				turnModel.current = model;
+				turn.current = new AbortController();
+				void sendMessage({ text: message });
+			},
+			answer: (toolCallId, answers, skipped) => {
+				addToolOutput({
+					tool: "ask_user",
+					toolCallId,
+					output: { answers, skipped },
+				});
+			},
+			stop: () => {
+				turn.current?.abort();
+				void stop();
+			},
+			loading: working,
+			writingScript,
+		}),
+		[sendMessage, addToolOutput, stop, working, writingScript, model],
+	);
+
+	return (
+		<SloppyControlContext value={control}>
+			<SloppyMessagesContext value={messages}>{children}</SloppyMessagesContext>
+		</SloppyControlContext>
+	);
+}

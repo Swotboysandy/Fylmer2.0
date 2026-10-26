@@ -1,0 +1,9 @@
+.player {
+	border-radius: 0.5rem;
+	overflow: hidden;
+}
+
+.player :global(.__remotion-player) {
+	border-radius: 0.5rem;
+	overflow: hidden;
+}

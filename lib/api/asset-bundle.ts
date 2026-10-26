@@ -1,0 +1,223 @@
+import { nanoid } from "nanoid";
+import { z } from "zod";
+
+const httpError = (res: Response, label: string) =>
+	new Error(`${label} (${res.status} ${res.statusText})`);
+
+async function fetchOk(url: string, label: string): Promise<Response> {
+	const res = await fetch(url);
+	if (!res.ok) throw httpError(res, label);
+	return res;
+}
+
+/** The parts of a manifest a bundle is read through. */
+const BundleContentsSchema = z.object({
+	result: z.record(z.string(), z.string()),
+	metadata: z.record(z.string(), z.unknown()).optional(),
+});
+
+type BundleContents = z.infer<typeof BundleContentsSchema>;
+
+type AssetManifest = BundleContents & {
+	version: number;
+	type: string;
+	createdAt: string;
+};
+
+type BundleFileBase = {
+	key: string;
+	filename: string;
+	contentType: string;
+};
+
+export type BundleFileData = BundleFileBase & {
+	data: Buffer | ArrayBuffer | string;
+};
+
+/** Bytes that live at someone else's URL. Re-hosted, never referenced. */
+export type BundleFileRemote = BundleFileBase & {
+	url: string;
+};
+
+export type BundleFile = BundleFileData | BundleFileRemote;
+
+type PutBody = Parameters<typeof import("@vercel/blob").put>[1];
+
+/** A remote file served with no bytes yet, as a host may briefly do right after it reports the file done. */
+export class EmptyRemoteFileError extends Error {
+	constructor(key: string, provider: string) {
+		super(`Empty file for "${key}" from ${provider}`);
+		this.name = "EmptyRemoteFileError";
+	}
+}
+
+/** The stream itself, or null when it ends before its first byte. */
+async function withBytes(
+	body: ReadableStream<Uint8Array> | null,
+): Promise<ReadableStream<Uint8Array> | null> {
+	if (!body) return null;
+	const [probe, stream] = body.tee();
+	const reader = probe.getReader();
+	const { value } = await reader.read();
+	// A tee branch's cancel settles only once the other branch ends too
+	void reader.cancel();
+	return value?.byteLength ? stream : null;
+}
+
+/** Remote sources stream in at an unknown size, so they upload in chunks. */
+async function sourceOf(
+	file: BundleFile,
+	provider: string,
+): Promise<{ body: PutBody; multipart: boolean }> {
+	if ("data" in file) return { body: file.data, multipart: false };
+	const res = await fetchOk(file.url, `Failed to fetch "${file.key}"`);
+	// Vercel rejects empty uploads as "Invalid body"
+	const body = await withBytes(res.body);
+	if (!body) throw new EmptyRemoteFileError(file.key, provider);
+	return { body, multipart: true };
+}
+
+export const BundleResponseSchema = BundleContentsSchema.extend({
+	id: z.string(),
+	type: z.string(),
+	provider: z.string(),
+	storage: z
+		.object({
+			bucket: z.literal("fylmer-generated"),
+			prefix: z.string().regex(/^[a-f0-9-]{36}\/[a-f0-9-]{36}$/),
+			manifestPath: z
+				.string()
+				.regex(/^[a-f0-9-]{36}\/[a-f0-9-]{36}\/[a-f0-9]{64}-manifest\.json$/),
+		})
+		.optional(),
+});
+
+export type BundleResponse = z.infer<typeof BundleResponseSchema>;
+
+type UploadOptions = { id?: string };
+
+export class AssetBundle {
+	static baseUrl = process.env.NEXT_PUBLIC_BLOB_URL ?? "";
+
+	constructor(
+		readonly url: string,
+		readonly manifest: BundleContents,
+	) {}
+
+	get durationSec(): number {
+		return Number(this.manifest.metadata?.durationSec ?? 0);
+	}
+
+	resolve(key: string): string {
+		const value = this.manifest.result[key];
+		if (!value) throw new Error(`No file "${key}" in asset bundle`);
+		if (/^https?:\/\//.test(value)) return value;
+		return `${this.url}/${value}`;
+	}
+
+	async fetchJson<T>(key: string, schema: z.ZodType<T>): Promise<T> {
+		const res = await fetchOk(this.resolve(key), `Failed to fetch "${key}"`);
+		return schema.parse(await res.json());
+	}
+
+	static buildUrl(type: string, provider: string, id: string): string {
+		return `${AssetBundle.baseUrl}/assets/${type}/${provider}/${id}`;
+	}
+
+	/** Whether `url` points into our own store, so it is safe to fetch server side. */
+	static holds(url: string): boolean {
+		return url.startsWith(`${AssetBundle.baseUrl}/assets/`);
+	}
+
+	static fromResponse(response: BundleResponse): AssetBundle {
+		if (response.storage) {
+			if (typeof window === "undefined")
+				throw new Error(
+					"Private generated media requires authenticated resolution.",
+				);
+			const parsed = BundleResponseSchema.parse(response);
+			const jobId = z.uuid().parse(parsed.id);
+			if (!parsed.storage?.prefix.endsWith(`/${jobId}`))
+				throw new Error("Private media does not match its job.");
+			const keys = z
+				.array(z.string().regex(/^[a-zA-Z0-9_-]{1,128}$/))
+				.min(1)
+				.max(16)
+				.parse(Object.keys(parsed.result));
+			return new AssetBundle(
+				`${window.location.origin}/api/generated-media/${jobId}`,
+				{
+					result: Object.fromEntries(keys.map((key) => [key, key])),
+					metadata: parsed.metadata,
+				},
+			);
+		}
+		const { type, provider, id } = response;
+		return new AssetBundle(AssetBundle.buildUrl(type, provider, id), response);
+	}
+
+	static async load(
+		type: string,
+		provider: string,
+		id: string,
+	): Promise<BundleResponse | null> {
+		const url = AssetBundle.buildUrl(type, provider, id);
+		const res = await fetch(`${url}/manifest.json`);
+		if (res.status === 404) return null;
+		if (!res.ok) throw httpError(res, "Failed to load asset bundle");
+		return {
+			id,
+			type,
+			provider,
+			...BundleContentsSchema.parse(await res.json()),
+		};
+	}
+
+	static async upload(
+		type: string,
+		provider: string,
+		files: BundleFile[],
+		metadata?: Record<string, unknown>,
+		{ id }: UploadOptions = {},
+	): Promise<BundleResponse> {
+		const { put } = await import("@vercel/blob");
+		// Two callers naming the same bundle write the same bytes, so the second may overwrite.
+		const named = id !== undefined;
+		const bundleId = id ?? nanoid();
+		const basePath = `assets/${type}/${provider}/${bundleId}`;
+
+		await Promise.all(
+			files.map(async (file) => {
+				const { body, multipart } = await sourceOf(file, provider);
+				return put(`${basePath}/${file.filename}`, body, {
+					access: "public",
+					contentType: file.contentType,
+					addRandomSuffix: false,
+					allowOverwrite: named,
+					multipart,
+				});
+			}),
+		);
+
+		const result = Object.fromEntries(
+			files.map((file) => [file.key, file.filename]),
+		);
+
+		const manifest: AssetManifest = {
+			version: 1,
+			type,
+			createdAt: new Date().toISOString(),
+			result,
+			metadata,
+		};
+
+		await put(`${basePath}/manifest.json`, JSON.stringify(manifest), {
+			access: "public",
+			contentType: "application/json",
+			addRandomSuffix: false,
+			allowOverwrite: named,
+		});
+
+		return { id: bundleId, type, provider, result, metadata };
+	}
+}

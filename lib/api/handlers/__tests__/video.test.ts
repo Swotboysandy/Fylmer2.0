@@ -1,0 +1,112 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { BundleResponse } from "@/lib/api/asset-bundle";
+import type { ModelRef, VideoGenerateParams } from "@/lib/connectors/types";
+import type { TypedJobRow } from "../base";
+import { videoHandler } from "../video";
+
+const submit = vi.fn();
+const poll = vi.fn();
+const markProviderStarted = vi.fn();
+
+vi.mock("@/lib/api/jobs", () => ({
+	markProviderStarted: (...args: unknown[]) => markProviderStarted(...args),
+}));
+
+vi.mock("@/lib/api/providers/openslop", () => ({
+	hostedProviderFor: () => ({ submit, poll }),
+}));
+
+type VideoJobRow = TypedJobRow<
+	VideoGenerateParams & ModelRef,
+	{ providerJobId?: string }
+>;
+
+const bundle = { id: "bundle-1" } as unknown as BundleResponse;
+
+// The handler resolves the stored name to the id Runware's own API takes.
+const VENDOR_PARAMS = {
+	prompt: "a cat",
+	model: "bytedance:seedance@2.0-fast",
+};
+
+function job(overrides: Partial<VideoJobRow> = {}): VideoJobRow {
+	return {
+		id: "job-1",
+		user_id: "user-1",
+		project_id: null,
+		connector_type: "video",
+		status: "processing",
+		request: {
+			prompt: "a cat",
+			provider: "openslop",
+			model: "Seedance 2 Fast",
+		},
+		result: null,
+		metadata: { providerJobId: "upstream-1" },
+		error: null,
+		created_at: "2026-01-01T00:00:00Z",
+		updated_at: "2026-01-01T00:00:00Z",
+		...overrides,
+	};
+}
+
+describe("videoHandler.process", () => {
+	beforeEach(() => {
+		vi.clearAllMocks();
+		poll.mockResolvedValue({ kind: "pending" });
+		markProviderStarted.mockResolvedValue(undefined);
+	});
+
+	it("submits upstream without polling a job it just created", async () => {
+		submit.mockResolvedValue("upstream-9");
+
+		await expect(videoHandler.process(job({ metadata: {} }))).resolves.toEqual({
+			kind: "pending",
+			metadata: { providerJobId: "upstream-9" },
+		});
+		expect(submit).toHaveBeenCalledWith(VENDOR_PARAMS);
+		expect(markProviderStarted).toHaveBeenCalledWith("job-1");
+		expect(markProviderStarted.mock.invocationCallOrder[0]).toBeLessThan(
+			submit.mock.invocationCallOrder[0],
+		);
+		expect(poll).not.toHaveBeenCalled();
+	});
+
+	it("advances the recorded upstream job without resubmitting", async () => {
+		await expect(videoHandler.process(job())).resolves.toEqual({
+			kind: "pending",
+			metadata: { providerJobId: "upstream-1" },
+		});
+		expect(submit).not.toHaveBeenCalled();
+		expect(markProviderStarted).not.toHaveBeenCalled();
+		expect(poll).toHaveBeenCalledWith("upstream-1", VENDOR_PARAMS, {
+			jobId: "job-1",
+		});
+	});
+
+	it("completes with the re-hosted bundle once upstream reports a video", async () => {
+		const asset = { ...bundle, result: { video: "output.mp4" } };
+		poll.mockResolvedValue({ kind: "ready", asset });
+
+		await expect(videoHandler.process(job())).resolves.toEqual({
+			kind: "completed",
+			result: asset,
+		});
+	});
+
+	it("fails the job when upstream reports the generation failed", async () => {
+		poll.mockResolvedValue({ kind: "failed" });
+
+		await expect(videoHandler.process(job())).rejects.toThrow(
+			"Video generation failed",
+		);
+	});
+
+	it("does not submit when the budget recheck refuses the job", async () => {
+		markProviderStarted.mockRejectedValue(new Error("Project cap changed"));
+		await expect(videoHandler.process(job({ metadata: {} }))).rejects.toThrow(
+			"Project cap changed",
+		);
+		expect(submit).not.toHaveBeenCalled();
+	});
+});

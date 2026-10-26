@@ -1,0 +1,394 @@
+import type {
+	LanguageModelV3Prompt,
+	LanguageModelV3StreamPart,
+} from "@ai-sdk/provider";
+import { MockLanguageModelV3, simulateReadableStream } from "ai/test";
+import omit from "lodash/omit";
+import type { ValidationResult } from "@/lib/connectors/provider-key";
+import type {
+	LLMGenerateParams,
+	LLMGenerateResult,
+	LLMStreamChunk,
+} from "@/lib/connectors/types";
+import { SCENE_MARKER_PATTERN } from "@/lib/canvas/constants";
+import { flatAttributes } from "@/lib/canvas/element-attributes";
+import { isAssetElement } from "@/lib/canvas/guards";
+import { getElementBodyText } from "@/lib/canvas/osml-serializer";
+import { parseOSML } from "@/lib/canvas/osml-stream-parser";
+import type { AgentToolName } from "@/lib/agent/tools/registry";
+import { DERIVE_INSTRUCTION } from "@/lib/project/derive-art-style";
+import { OUTLINE_INSTRUCTION } from "@/lib/script/prompt/outline";
+import { NO_FINDINGS, REVIEW_INSTRUCTION } from "@/lib/script/prompt/review";
+import { animateImageScene } from "@/lib/script/refine/animate-prompt";
+import type { RefineOp } from "@/lib/script/refine/types";
+import { sleep } from "@/lib/utils";
+import type { Priced } from "../base";
+import type { AgentModel } from "./agent-model";
+import type { LLMProvider } from "./base";
+
+const MOCK_TITLE = "Little Red";
+
+const MOCK_ASSETS: RefineOp[] =
+	parseOSML(`<asset_style>Warm, earth tones. Whimsical storybook illustration with soft watercolors, gentle brush strokes, warm lighting.</asset_style>
+
+<asset_voice name="Narrator" gender="feminine" age="adult" pitch="medium" accent="american" description="warm, grandmotherly, kind" language="en"></asset_voice>
+
+<asset_avatar name="Red">A cheerful girl around eight years old with warm brown skin, dark curly hair in two puffs, bright brown eyes, wearing a bright red hooded cloak over a white dress, small brown leather boots.</asset_avatar>
+<asset_voice name="Red" gender="feminine" age="child" pitch="high" accent="american" description="bright, cheerful, youthful" language="en"></asset_voice>
+
+<asset_avatar name="Wolf">A large gray wolf with kind amber eyes, soft thick fur, wearing a worn brown vest with wooden buttons, slightly hunched posture, gentle expression despite sharp teeth.</asset_avatar>
+<asset_voice name="Wolf" gender="masculine" age="adult" pitch="low" accent="american" description="gentle, soft-spoken, kind" language="en"></asset_voice>
+
+<asset_avatar name="Mother">Red's mother, a tall woman with warm brown skin, long black braided hair tied back with a green ribbon, kind dark eyes, wearing a long blue dress and a flour-dusted apron.</asset_avatar>
+<asset_voice name="Mother" gender="feminine" age="adult" pitch="medium" accent="american" description="caring, gentle, melodic" language="en"></asset_voice>
+
+<asset_avatar name="Granny">Red's grandmother, a small elderly woman with deep brown skin, silver hair in a bun, twinkling hazel eyes behind round spectacles, wearing a soft purple shawl.</asset_avatar>
+<asset_voice name="Granny" gender="feminine" age="adult" pitch="medium" accent="american" description="caring, gentle, melodic" language="en"></asset_voice>
+
+`)
+		.filter(isAssetElement)
+		.map((asset) => ({
+			op: "insert",
+			type: asset.type,
+			attrs: omit(flatAttributes(asset), ["provider", "model"]),
+			text: getElementBodyText(asset),
+		}));
+
+const MOCK_SCRIPT = `<video>Shot 1: Slow pan across a peaceful village at the edge of a lush green forest on a sunny morning, from a cozy cottage with a red door toward the dirt path into the woods. Sound: birds singing, a light breeze in the trees. Shot 2: Wide shot down the flower-lined path as birds fly overhead.</video>
+
+<music length="medium">Gentle, playful orchestral music with flutes and strings, lighthearted and cheerful</music>
+
+<narration emotion="cheerful">Once upon a time, in a village at the edge of a great forest, there lived a kind girl named Red.</narration>
+
+<image motion="pushIn">Inside a sunlit kitchen with copper pots hanging on the wall, {{Red}} (a cheerful girl with brown skin, dark curly hair in two puffs, brown eyes, wearing a bright red hooded cloak and a white dress) stands beside her {{Mother}} (a tall woman with warm brown skin, long black braided hair tied back with a green ribbon, kind dark eyes, wearing a long blue dress and a flour-dusted apron). {{Mother}} gently places a wicker basket of fresh vegetables in {{Red}}'s hands.</image>
+
+<character name="Mother" emotion="gentle">"Take these straight to Granny, sweetheart. And please don't dawdle along the way."</character>
+
+<character name="Red" emotion="excited">"I won't, Mama! I'll be back before sundown!"</character>
+
+<image motion="tiltDown">{{Red}} stands at her cottage door holding a wicker basket filled with fresh vegetables including carrots, lettuce, and tomatoes. She smiles warmly. Morning sunlight streams through nearby trees.</image>
+
+<narration emotion="happy">Red got her name from the beautiful red cloak she wore everywhere. Today, she was taking a basket of fresh vegetables to her grandmother, who lived deep in the woods.</narration>
+
+<sound loops="5">birds chirping</sound>
+
+<narration emotion="content">Red skipped along the forest path, humming a cheerful tune.</narration>
+
+<sound>footsteps on dirt path</sound>
+
+<video>Shot 1: Gentle upward pan through the forest canopy, sunlight filtering through the leaves, ending on {{Owl}} perched high in the branches of an ancient oak as she slowly turns her head toward the path below. Sound: leaves rustling high above.</video>
+
+<narration emotion="wonder">High above, Owl watched silently from the trees. She had been the keeper of these woods for longer than anyone could remember.</narration>
+
+<character name="Owl" emotion="calm">"A child enters the forest today. The wind tells me she will not walk alone."</character>
+
+<video duration="4" motion="handheldDrift">Shot 1: Medium shot of {{Wolf}} carefully picking ripe red berries from thick bushes and dropping them into a wicker basket at his feet, dappled sunlight through the canopy. Sound: branches rustling.</video>
+
+<narration emotion="mysterious">Not far away, someone else was in the forest that morning. Wolf was gathering wild berries near the path.</narration>
+
+<sound loops="4">rustling leaves</sound>
+
+<narration emotion="sympathetic">Now, Wolf looked scary with his big teeth and sharp claws, but he had a secret. He didn't eat meat at all! He was a vegetarian who loved berries, nuts, and vegetables.</narration>
+
+<character name="Wolf" emotion="content">"These berries will make Mother feel so much better. She loves berry soup."</character>
+
+<narration emotion="calm">Wolf's mother had a terrible cold, and he wanted to bring her something special.</narration>
+
+<image>{{Red}} and {{Wolf}} meet face to face on a sunlit forest path. {{Red}} holds her vegetable basket; {{Wolf}} holds his berry basket. Both look surprised but unafraid. A shaft of golden light falls between them. Wildflowers grow along the path.</image>
+
+<character name="Red" emotion="curious">"Oh! Hello, Mr. Wolf. Are those berries for someone special?"</character>
+
+<character name="Wolf" emotion="happy">"For my mother. She has a cold. And you, little one?"</character>
+
+<character name="Red" emotion="cheerful">"Vegetables for my Granny. She lives just past the great oak."</character>
+
+<narration emotion="warm">They decided to walk together, two unlikely friends sharing the forest path.</narration>
+
+<sound loops="6">forest stream burbling</sound>
+
+<video duration="5" motion="panRight">Shot 1: Tracking shot of {{Red}} and {{Wolf}} walking side by side along a winding fern-lined path, a small stream in the background. Sound: footsteps on soft dirt, a stream burbling nearby. Shot 2: {{Red}} gestures as she talks while {{Wolf}} listens with a gentle smile.</video>
+
+<music length="short">Light, twinkling music with playful pizzicato strings</music>
+
+<character name="Wolf" emotion="curious">"Tell me about your Granny. What is she like?"</character>
+
+<character name="Red" emotion="proud">"She tells the best stories! And she knits the warmest mittens. And she always has cookies."</character>
+
+<image motion="panLeft">A clearing where the forest path meets a sturdy bridge over a stream. {{Hunter}} (a broad-shouldered woodsman with a thick brown beard, blue eyes, wearing a green cloak with a hatchet at his belt) stands by the bridge waving warmly at {{Red}} and {{Wolf}} as they approach. His sturdy brown boots crunch on the gravel.</image>
+
+<character name="Hunter" emotion="hearty">"Well now! Little Red and her woodland friend! You two heading to the old oak cottage?"</character>
+
+<character name="Red" emotion="excited">"Yes, Mr. Hunter! Granny isn't feeling well."</character>
+
+<character name="Hunter" emotion="kind">"Then walk safe. Tell her I'll bring firewood by tomorrow."</character>
+
+<sound>creaking wooden bridge</sound>
+
+<narration emotion="warm">They thanked Hunter and crossed the little bridge, the stream singing beneath their feet.</narration>
+
+<video>Shot 1: Slow push-in toward the open door of a small thatched cottage among ancient oaks, smoke curling from the chimney above a window box of marigolds. Sound: birdsong, a fire crackling inside. Shot 2: Medium shot of {{Granny}} stepping into the doorway leaning on a wooden cane, smiling warmly. Shot 3: Close-up of {{Granny}}'s face as her eyes crinkle with delight. Sound: the cane tapping on the stone step.</video>
+
+<character name="Granny" emotion="delighted">"Red, my darling! And who is this handsome fellow you've brought along?"</character>
+`;
+
+const MOCK_STYLE =
+	"Warm, painterly storybook illustration with soft watercolor washes, gentle outlines, and golden hour lighting; whimsical and nostalgic.";
+
+const MOCK_OUTLINE = `Premise: In a village at the edge of an enchanted forest, a cheerful girl named Red sets out to deliver vegetables to her ailing grandmother and unexpectedly befriends a gentle, vegetarian wolf gathering berries for his own sick mother.
+
+Characters: Red (curious, kind); Wolf (gentle, misunderstood); Mother and Granny (warm anchors of home); Hunter (a watchful protector); Owl (the forest's quiet conscience).
+
+Themes: Looking past appearances; small acts of care; the forest as a shared home.
+
+Conflict: Red has been warned not to dawdle, and Wolf's frightening exterior collides with her mother's caution — both must decide whether to trust what they see.
+
+Twists: The "big bad wolf" is the kindest soul in the forest; Owl has been silently steering their meeting all along.
+
+Resolution: Red and Wolf arrive together at Granny's cottage, share their baskets, and the village learns that friendship can grow in the most unlikely places.`;
+
+const MOCK_RESPONSES: [matches: (prompt: string) => boolean, text: string][] = [
+	[(prompt) => prompt.startsWith(DERIVE_INSTRUCTION), MOCK_STYLE],
+	[(prompt) => prompt.startsWith(OUTLINE_INSTRUCTION), MOCK_OUTLINE],
+	[(prompt) => prompt.startsWith(REVIEW_INSTRUCTION), NO_FINDINGS],
+];
+
+function mockResponse({ prompt }: LLMGenerateParams): string {
+	return (
+		MOCK_RESPONSES.find(([matches]) => matches(prompt))?.[1] ?? MOCK_SCRIPT
+	);
+}
+
+export class MockLLM implements LLMProvider {
+	async validate(): Promise<ValidationResult> {
+		return { ok: true };
+	}
+
+	async generate(
+		params: LLMGenerateParams,
+	): Promise<Priced<LLMGenerateResult>> {
+		return {
+			output: {
+				text: mockResponse(params),
+				model: "mock",
+				usage: { inputTokens: 0, outputTokens: 0 },
+			},
+			costUsd: 0,
+		};
+	}
+
+	async *stream(
+		params: LLMGenerateParams,
+	): AsyncGenerator<LLMStreamChunk, number> {
+		await sleep(500);
+		const text = mockResponse(params);
+		let offset = 0;
+		while (offset < text.length) {
+			const size = 1 + Math.floor(Math.random() * 12);
+			await sleep(20 + Math.random() * 40);
+			yield { text: text.slice(offset, offset + size), done: false };
+			offset += size;
+		}
+		yield { text: "", done: true };
+		return 0;
+	}
+
+	agentModel(modelId: string): AgentModel {
+		return {
+			model: mockAgentModel(),
+			modelId,
+			providerOptions: {},
+			cachedPrefix: {},
+			costOf: () => 0,
+		};
+	}
+}
+
+/** The first element that says something: a blank canvas still holds an empty one. */
+const ELEMENT_ID = /id="([^"]+)"[^>]*>[^<]/;
+const IMAGE_ID = /<image[^>]*\bid="([^"]+)"/;
+
+/** What a script reads as between one scene marker and the next. */
+const sceneSection = (script: string, scene: number): string =>
+	script.split(SCENE_MARKER_PATTERN)[scene] ?? "";
+const EDIT_REQUEST =
+	/\b(add|remove|delete|change|edit|rewrite|shorten|lengthen|make|replace|move|swap|fix|tweak|animate|shorter|longer|warmer|colder)\b/i;
+
+function textOf(message: LanguageModelV3Prompt[number]): string {
+	if (typeof message.content === "string") return message.content;
+	return message.content
+		.map((part) => (part.type === "text" ? part.text : ""))
+		.join("");
+}
+
+function outputText(output: { type: string; value?: unknown }): string {
+	return typeof output.value === "string" ? output.value : "";
+}
+
+function turnToolResults(prompt: LanguageModelV3Prompt): ToolResult[] {
+	// An earlier turn's reads describe a canvas that has since been edited.
+	const askedAt = prompt.findLastIndex((message) => message.role === "user");
+	return prompt
+		.slice(askedAt + 1)
+		.flatMap((message) => (message.role === "tool" ? message.content : []))
+		.flatMap((part) =>
+			part.type === "tool-result"
+				? [{ toolName: part.toolName, text: outputText(part.output) }]
+				: [],
+		);
+}
+
+/** What the user actually asked for, apart from the prompt around it. */
+function lastUserText(prompt: LanguageModelV3Prompt): string {
+	const user = prompt.findLast((message) => message.role === "user");
+	return user ? textOf(user) : "";
+}
+
+function parts(
+	kind: "text" | "reasoning",
+	id: string,
+	text: string,
+): LanguageModelV3StreamPart[] {
+	return [
+		{ type: `${kind}-start`, id },
+		...text
+			.split(/(?<= )/)
+			.map((delta) => ({ type: `${kind}-delta` as const, id, delta })),
+		{ type: `${kind}-end`, id },
+	] as LanguageModelV3StreamPart[];
+}
+
+/** Long-winded so the mock thinks for a couple of seconds, the way a real model does. */
+const MOCK_THOUGHT =
+	"Reading the canvas to see what is already on it. Working out which scene the request points at, which elements sit inside that scene, and what the script currently says about each of them. Weighing whether this reads as a question to answer or as an edit to make, since the two want different tools, and a wrong guess there means an edit nobody asked for. Then picking the smallest change that does what was asked, so nothing else in the script has to move around, and nothing already on the canvas gets rewritten by accident. ";
+
+type ToolResult = { toolName: string; text: string };
+
+type MockStep = { say: string; toolName?: AgentToolName; input?: unknown };
+
+const READ_SCRIPT: MockStep = {
+	say: "Reading the script. ",
+	toolName: "read_script",
+	input: {},
+};
+
+/**
+ * Only edits when the message reads like a request to change something, so a
+ * plain question gets a plain answer the way a real model would give one.
+ */
+function afterReading(asked: string, { text: script }: ToolResult): MockStep {
+	const scene = animateImageScene(asked);
+	const elementId =
+		scene === null
+			? ELEMENT_ID.exec(sceneSection(script, 1))?.[1]
+			: IMAGE_ID.exec(sceneSection(script, scene))?.[1];
+
+	if (!elementId) {
+		return {
+			say: "Naming the project. ",
+			toolName: "set_title",
+			input: { title: MOCK_TITLE },
+		};
+	}
+
+	if (scene === null && !EDIT_REQUEST.test(asked)) {
+		return {
+			say: "No API key is set, so I am a mock. Ask me to change the script and I will edit it.",
+		};
+	}
+
+	return {
+		say: "Rewriting an element. ",
+		toolName: "edit_script",
+		input: {
+			ops: [
+				{
+					op: "set",
+					id: elementId,
+					...(scene === null
+						? {
+								text: "A mock edit, from the agent running without an API key.",
+							}
+						: {
+								type: "video",
+								text: "Shot 1: Slow cinematic push-in, the light shifting gently across the frame.",
+							}),
+				},
+			],
+		},
+	};
+}
+
+/** A new project is named, given its assets, then written; a replaced script is read again. */
+type NextStep = (results: ToolResult[]) => MockStep;
+
+const NEXT_STEP: Record<string, NextStep> = {
+	write_script: () => READ_SCRIPT,
+	set_title: () => ({
+		say: "Setting up the characters and the art style. ",
+		toolName: "edit_script",
+		input: { ops: MOCK_ASSETS },
+	}),
+	edit_script: (results) =>
+		results.at(-2)?.toolName === "set_title"
+			? {
+					say: "Writing a script onto the canvas. ",
+					toolName: "write_script",
+					input: { brief: "A short mock story, written without an API key." },
+				}
+			: { say: "Done. That is as much as a mock can do without an API key." },
+} satisfies Partial<Record<AgentToolName, NextStep>>;
+
+function mockCall(prompt: LanguageModelV3Prompt): MockStep {
+	const results = turnToolResults(prompt);
+	const last = results.at(-1);
+	// The canvas is never in the prompt, so a turn reads it before anything else.
+	if (!last) return READ_SCRIPT;
+	return (
+		NEXT_STEP[last.toolName]?.(results) ??
+		afterReading(lastUserText(prompt), last)
+	);
+}
+
+/**
+ * A language model rather than a short-circuit in the route, so the whole agent
+ * path runs unchanged without an API key.
+ */
+function mockAgentModel() {
+	return new MockLanguageModelV3({
+		doStream: async ({ prompt }) => {
+			const { say, toolName, input } = mockCall(prompt);
+			const chunks: LanguageModelV3StreamPart[] = [
+				{ type: "stream-start", warnings: [] },
+				...parts("reasoning", "r0", MOCK_THOUGHT),
+				...parts("text", "t0", say),
+				...(toolName
+					? ([
+							{
+								type: "tool-call",
+								toolCallId: `mock-${toolName}`,
+								toolName,
+								input: JSON.stringify(input),
+							},
+						] as LanguageModelV3StreamPart[])
+					: []),
+				{
+					type: "finish",
+					finishReason: toolName
+						? { unified: "tool-calls", raw: "tool_use" }
+						: { unified: "stop", raw: "end_turn" },
+					usage: {
+						inputTokens: { total: 0, noCache: 0, cacheRead: 0, cacheWrite: 0 },
+						outputTokens: { total: 0, text: 0, reasoning: 0 },
+					},
+				},
+			];
+			return {
+				stream: simulateReadableStream({
+					chunks,
+					chunkDelayInMs: 20,
+					initialDelayInMs: 200,
+				}),
+			};
+		},
+	});
+}

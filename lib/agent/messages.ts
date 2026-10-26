@@ -1,0 +1,99 @@
+import {
+	getToolName,
+	isToolUIPart,
+	safeValidateUIMessages,
+	validateUIMessages,
+} from "ai";
+import { SLOPPY_TOOLS, SNAPSHOT_TOOLS } from "./tools/registry";
+import { sloppyMetadataSchema, type SloppyMessage } from "./types";
+
+export function upsertMessage(
+	messages: SloppyMessage[],
+	message: SloppyMessage,
+): SloppyMessage[] {
+	const index = messages.findIndex((existing) => existing.id === message.id);
+	return index === -1 ? [...messages, message] : messages.with(index, message);
+}
+
+export function trailingAssistant(
+	messages: SloppyMessage[],
+): SloppyMessage | null {
+	const last = messages.at(-1);
+	return last?.role === "assistant" ? last : null;
+}
+
+export function toolCallsMade(messages: SloppyMessage[]): number {
+	return (trailingAssistant(messages)?.parts ?? []).filter(isToolUIPart).length;
+}
+
+const isUnanswered = (part: SloppyMessage["parts"][number]) =>
+	isToolUIPart(part) && part.state === "input-available";
+
+/** A call the editor has been handed and not yet answered, of any tool or of `tools`. */
+export function hasPendingToolCall(
+	messages: SloppyMessage[],
+	tools?: ReadonlySet<string>,
+): boolean {
+	return (trailingAssistant(messages)?.parts ?? []).some(
+		(part) => isUnanswered(part) && (!tools || tools.has(getToolName(part))),
+	);
+}
+
+const UNANSWERED = "Stopped before the editor ran it";
+
+/** A stored call the editor never answered: the turn was stopped between the call and its result. */
+export function settleUnansweredCalls(
+	messages: SloppyMessage[],
+): SloppyMessage[] {
+	return messages.map((message) => ({
+		...message,
+		parts: message.parts.map((part) =>
+			isUnanswered(part) && getToolName(part) !== "ask_user"
+				? { ...part, state: "output-error", errorText: UNANSWERED }
+				: part,
+		),
+	}));
+}
+
+const isPruned = (part: SloppyMessage["parts"][number]) =>
+	part.type === "reasoning" ||
+	(isToolUIPart(part) && SNAPSHOT_TOOLS.has(getToolName(part)));
+
+/** Drops reasoning and snapshot tool parts from every assistant message that is not the trailing one. */
+export function pruneTranscript(messages: SloppyMessage[]): SloppyMessage[] {
+	return messages.map((message, index) => {
+		if (index === messages.length - 1 || message.role !== "assistant")
+			return message;
+		return {
+			...message,
+			parts: message.parts.filter((part) => !isPruned(part)),
+		};
+	});
+}
+
+// Optional: the message a turn opens with carries no metadata yet, and the
+// validator checks the field whether or not it is there.
+const shape = {
+	metadataSchema: sloppyMetadataSchema.optional(),
+	tools: SLOPPY_TOOLS,
+};
+
+/** Rows the server wrote. A row it cannot read back is a broken transcript, not a 400. */
+export async function parseSloppyMessages(
+	messages: unknown[],
+): Promise<SloppyMessage[]> {
+	// The validator refuses an empty array; a new conversation is one.
+	if (messages.length === 0) return [];
+	return validateUIMessages<SloppyMessage>({ messages, ...shape });
+}
+
+/** One message off the wire. Null is the caller's 400, never a thrown 500. */
+export async function parseSloppyMessage(
+	message: unknown,
+): Promise<SloppyMessage | null> {
+	const parsed = await safeValidateUIMessages<SloppyMessage>({
+		messages: [message],
+		...shape,
+	});
+	return parsed.success ? (parsed.data[0] ?? null) : null;
+}
