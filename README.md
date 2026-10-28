@@ -1,5 +1,7 @@
 # Frame lab — working title: Framelock
 
+This branch adds the **Dream Journey experiment** at **http://127.0.0.1:4317/dream**. The original editor stays at the root URL. See [the experiment brief](docs/DREAM_EXPERIMENT.md) for scope and limitations. This branch has not been merged into main.
+
 A separate object-editing prototype for the Meta hackathon. The final product name is undecided. Change `src/brand.ts` when the team chooses it; the current repository name is also provisional.
 
 The first slice is **select an object → preview a colour correction → approve or discard → export or undo**. It does not yet generate films, understand spoken directions, or detect continuity errors automatically.
