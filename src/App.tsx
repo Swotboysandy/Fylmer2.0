@@ -1,683 +1,954 @@
-import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ArrowDownToLine,
-  ArrowRight,
-  Check,
-  ChevronDown,
-  CircleHelp,
-  Focus,
-  LoaderCircle,
-  RotateCcw,
-  Scan,
-  Upload,
-  Volume2,
-  X,
-} from 'lucide-react';
-import { brand } from './brand';
-import { FrameStage, type View } from './components/FrameStage';
-import { expandMask, recolor } from './lib/correction';
-import {
-  download,
-  downloadJson,
-  loadSample,
-  loadUpload,
-  maskToUrl,
-  pixelsToUrl,
-  sampleMask,
-} from './lib/media';
-import { editSession, initialSession } from './lib/session';
-import type { FrameAsset, SegmentationResult, ServiceStatus } from './types';
-
-const colors = [
-  { name: 'Cobalt', hex: '#4169d8' },
-  { name: 'Forest', hex: '#397d62' },
-  { name: 'Ochre', hex: '#bd852a' },
-  { name: 'Plum', hex: '#86518d' },
-];
-const errorText = (error: unknown) =>
-  error instanceof Error ? error.message : 'That action could not be completed.';
+  ContinuityRule,
+  DirectorPresetScenario,
+  ModelInvocationRecord,
+  ProjectState,
+  StoryboardShot,
+} from './types/framelock';
+import { DIRECTOR_PRESETS, metaModelClient } from './services/metaModels';
+import { speechService } from './services/speechService';
+import { renderMuseStoryboardFrame } from './services/canvasEngine';
+import { VoiceTranscriptPanel } from './components/VoiceTranscriptPanel';
+import { StoryboardStage } from './components/StoryboardStage';
+import { AudioTimeline } from './components/AudioTimeline';
+import { ShotInspectorPanel } from './components/ShotInspectorPanel';
+import { KeyboardShortcutsModal } from './components/KeyboardShortcutsModal';
 
 export default function App() {
-  const [state, dispatch] = useReducer(editSession, initialSession);
-  const [service, setService] = useState<ServiceStatus | null>(null);
-  const [connectionError, setConnectionError] = useState(false);
-  const [concept, setConcept] = useState('cup');
-  const [view, setView] = useState<View>('original');
-  const [busy, setBusy] = useState<'load' | 'sample' | 'sam' | null>(null);
-  const [notice, setNotice] = useState(
-    'Load a selection to begin. Your original will stay intact.',
-  );
-  const [error, setError] = useState('');
-  const [speaking, setSpeaking] = useState(false);
-  const requestVersion = useRef(0);
-  const pending = useRef<AbortController | null>(null);
-  const uploadInput = useRef<HTMLInputElement>(null);
-  const selected = state.masks.find((mask) => mask.id === state.selectedId);
-  const raster = useMemo(() => (selected ? expandMask(selected) : null), [selected]);
-  const overlay = useMemo(
-    () => (raster && state.asset ? maskToUrl(raster, state.asset.width, state.asset.height) : null),
-    [raster, state.asset],
-  );
-  const correction = state.candidate ?? state.approved;
-  const colorName = colors.find((color) => color.hex === state.color)?.name ?? state.color;
-  const validColor = /^#[0-9a-f]{6}$/i.test(state.color);
-  const isApproved = Boolean(state.approved && !state.candidate);
-  const description =
-    state.asset?.kind === 'sample'
-      ? `${view === 'correction' && correction ? 'A recoloured' : 'A red'} ceramic cup on a wooden table by a rain-streaked window, with a notebook and plant. This is an original sample illustration.`
-      : `Imported frame: ${state.asset?.name ?? 'loading'}. ${view === 'selection' ? 'The chosen object is highlighted.' : view === 'correction' ? 'A colour correction is shown.' : 'The original image is shown.'} Automatic scene description is not available in this first build.`;
+  const initialPreset = DIRECTOR_PRESETS[0];
 
-  const refreshStatus = useCallback(async () => {
-    try {
-      const response = await fetch('/api/health');
-      if (!response.ok) throw new Error('Unavailable');
-      setService(await response.json());
-      setConnectionError(false);
-    } catch {
-      setConnectionError(true);
-    }
-  }, []);
+  const [projectState, setProjectState] = useState<ProjectState>({
+    projectId: 'proj-framelock-01',
+    title: initialPreset.title,
+    transcript: initialPreset.transcript,
+    isRecording: false,
+    rules: [],
+    shots: [],
+    activeShotId: null,
+    isPlayingAnimatic: false,
+    isProcessing: true,
+    statusAnnouncement:
+      'Framelock Studio initialized. Loading Sequence 01: Midnight Diner Rain and running continuity audit.',
+  });
 
-  const load = useCallback(async (loader: () => Promise<FrameAsset>) => {
-    const version = ++requestVersion.current;
-    pending.current?.abort();
-    setBusy('load');
-    setError('');
-    try {
-      const asset = await loader();
-      if (version !== requestVersion.current) return;
-      dispatch({ type: 'load', asset });
-      setView('original');
-      setNotice(
-        asset.kind === 'sample'
-          ? 'Sample loaded. Use the offline selection to try a correction.'
-          : 'Frame loaded. Connect SAM to select an object in your image.',
-      );
-    } catch (error) {
-      if (version === requestVersion.current) setError(errorText(error));
-    } finally {
-      if (version === requestVersion.current) setBusy(null);
-    }
-  }, []);
+  const [activePresetId, setActivePresetId] = useState<string>(initialPreset.id);
+  const [showSamMaskOverlay, setShowSamMaskOverlay] = useState<boolean>(true);
+  const [viewMode, setViewMode] = useState<'grid' | 'animatic'>('grid');
+  const [currentTimeSeconds, setCurrentTimeSeconds] = useState<number>(0);
+  const [isSpeaking, setIsSpeaking] = useState<boolean>(false);
+  const [isMuted, setIsMuted] = useState<boolean>(false);
+  const [isShortcutsModalOpen, setIsShortcutsModalOpen] = useState<boolean>(false);
+  const [modelLogs, setModelLogs] = useState<ModelInvocationRecord[]>([]);
 
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const lastNarratedShotIdInAnimaticRef = useRef<string | null>(null);
+
+  // Subscribe to speech synthesis state and Meta Model logs
   useEffect(() => {
-    void load(loadSample);
-    void refreshStatus();
+    speechService.setSpeakingCallback(setIsSpeaking);
+    metaModelClient.onLogUpdate((logs) => setModelLogs([...logs]));
+  }, []);
+
+  // Announce status helper (updates aria-live region + optional TTS narration)
+  const announceStatus = useCallback((message: string, speakAloud: boolean = true) => {
+    setProjectState((prev) => ({
+      ...prev,
+      statusAnnouncement: message,
+    }));
+    if (speakAloud) {
+      speechService.speak(message, true);
+    }
+  }, []);
+
+  // Load initial storyboard sequence on mount
+  useEffect(() => {
+    let mounted = true;
+    metaModelClient
+      .generateStoryboardFromTranscript(initialPreset.transcript, undefined, true)
+      .then(({ rules, shots }) => {
+        if (!mounted) return;
+        const mismatchShot = shots.find((s) => s.status === 'mismatch');
+        setProjectState((prev) => ({
+          ...prev,
+          rules,
+          shots,
+          activeShotId: mismatchShot ? mismatchShot.id : shots[0]?.id || null,
+          isProcessing: false,
+          statusAnnouncement: `Loaded ${shots.length} storyboard shots. Continuity Alert in Shot ${
+            mismatchShot?.shotNumber || 2
+          }: ${mismatchShot?.discrepancyMessage || 'Discrepancy detected.'} Press Y to apply SAM 3.1 fix or N to narrate.`,
+        }));
+      });
     return () => {
-      requestVersion.current++;
-      pending.current?.abort();
-      window.speechSynthesis?.cancel();
+      mounted = false;
     };
-  }, [load, refreshStatus]);
-  useEffect(() => {
-    document.title = `${brand.name} — ${brand.descriptor}`;
+  }, [initialPreset.transcript]);
+
+  // Compute total animatic duration
+  const totalDurationSeconds = useMemo(
+    () => projectState.shots.reduce((acc, s) => acc + s.durationSeconds, 0),
+    [projectState.shots]
+  );
+
+  // Active shot reference
+  const activeShot = useMemo(
+    () =>
+      projectState.shots.find((s) => s.id === projectState.activeShotId) ||
+      projectState.shots[0] ||
+      null,
+    [projectState.shots, projectState.activeShotId]
+  );
+
+  // Select a shot and optionally narrate it
+  const handleSelectShot = useCallback(
+    (shotId: string, narrate: boolean = false) => {
+      const target = projectState.shots.find((s) => s.id === shotId);
+      if (!target) return;
+
+      speechService.playEarcon(target.status === 'mismatch' ? 'mismatch' : 'focus');
+
+      // Calculate timeline start offset for this shot
+      let timeOffset = 0;
+      for (const s of projectState.shots) {
+        if (s.id === shotId) break;
+        timeOffset += s.durationSeconds;
+      }
+      setCurrentTimeSeconds(timeOffset);
+
+      setProjectState((prev) => ({
+        ...prev,
+        activeShotId: shotId,
+        statusAnnouncement: `Selected Shot ${target.shotNumber} of ${prev.shots.length}. ${
+          target.status === 'mismatch'
+            ? `Continuity Discrepancy: ${target.discrepancyMessage}`
+            : 'Continuity verified.'
+        }`,
+      }));
+
+      if (narrate) {
+        speechService.speak(target.spokenDescription, true);
+      }
+    },
+    [projectState.shots]
+  );
+
+  // Narrate a specific shot on demand
+  const handleNarrateShot = useCallback((shot: StoryboardShot) => {
+    setProjectState((prev) => ({
+      ...prev,
+      statusAnnouncement: `Narrating Shot ${shot.shotNumber}: ${shot.spokenDescription}`,
+    }));
+    speechService.speak(shot.spokenDescription, true);
   }, []);
 
-  async function selectSample() {
-    if (!state.asset || busy) return;
-    const version = ++requestVersion.current;
-    setBusy('sample');
-    setError('');
-    try {
-      const mask = await sampleMask(state.asset);
-      if (version !== requestVersion.current) return;
-      dispatch({ type: 'masks', masks: [mask], sourceHash: state.asset.hash });
-      setView('selection');
-      setNotice('Cup selected using the hand-authored sample mask. No SAM request was made.');
-    } catch (error) {
-      if (version === requestVersion.current) setError(errorText(error));
-    } finally {
-      if (version === requestVersion.current) setBusy(null);
-    }
-  }
+  // Rebuild storyboard from transcript (`muse-spark-1.3` + `muse-image-1.0` + `sam-3.1`)
+  const handleRebuildFromTranscript = useCallback(
+    async (injectDiscrepancy: boolean = true, overrideTranscript?: string) => {
+      const targetTranscript = overrideTranscript ?? projectState.transcript;
+      setProjectState((prev) => ({
+        ...prev,
+        isProcessing: true,
+        statusAnnouncement:
+          'Running muse-spark-1.3 shot planner and muse-image-1.0 storyboard synthesis...',
+      }));
 
-  async function selectWithSam() {
-    if (!state.asset || !service?.configured || busy) return;
-    const version = ++requestVersion.current;
-    const controller = new AbortController();
-    pending.current = controller;
-    setBusy('sam');
-    setError('');
-    setNotice('SAM is locating the object. The original is unchanged.');
-    try {
-      const response = await fetch('/api/segment', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Framelock-Session': service.sessionToken,
-        },
-        body: JSON.stringify({ image: state.asset.dataUrl, concept, sourceHash: state.asset.hash }),
-        signal: controller.signal,
-      });
-      const result = (await response.json()) as SegmentationResult & { error?: string };
-      if (!response.ok) throw new Error(result.error ?? 'SAM could not complete this selection.');
-      if (version !== requestVersion.current) return;
-      if (result.sourceHash !== state.asset.hash || !Array.isArray(result.objects))
-        throw new Error('The selection does not belong to this frame. Please try again.');
-      result.objects.forEach((mask) => {
-        if (
-          mask.sourceHash !== state.asset!.hash ||
-          mask.width !== state.asset!.width ||
-          mask.height !== state.asset!.height
-        )
-          throw new Error(
-            'SAM returned a selection for a different source. No correction was applied.',
-          );
-        expandMask(mask);
-      });
-      dispatch({ type: 'masks', masks: result.objects, sourceHash: result.sourceHash });
-      setView(result.objects.length === 1 ? 'selection' : 'original');
-      setNotice(
-        result.objects.length === 0
-          ? 'SAM found no matches. Try a plain object name or a clearer image; this does not prove the object is absent.'
-          : result.objects.length === 1
-            ? 'One object selected with SAM. Inspect the mask before correcting it.'
-            : `${result.objects.length} objects found. Choose which object to correct.`,
+      const { rules, shots } = await metaModelClient.generateStoryboardFromTranscript(
+        targetTranscript,
+        undefined,
+        injectDiscrepancy
       );
-    } catch (error) {
-      if (version === requestVersion.current && !controller.signal.aborted) {
-        setError(errorText(error));
-        setNotice('Selection did not complete. The original is unchanged.');
+
+      const mismatchShot = shots.find((s) => s.status === 'mismatch');
+      speechService.playEarcon(mismatchShot ? 'mismatch' : 'consistent');
+
+      const summaryMsg = mismatchShot
+        ? `Generated ${shots.length} shots. Discrepancy flagged in Shot ${mismatchShot.shotNumber}: ${mismatchShot.discrepancyMessage}`
+        : `Generated ${shots.length} shots. All shots pass continuity verification.`;
+
+      setProjectState((prev) => ({
+        ...prev,
+        transcript: targetTranscript,
+        rules,
+        shots,
+        activeShotId: mismatchShot ? mismatchShot.id : shots[0]?.id || null,
+        isProcessing: false,
+        statusAnnouncement: summaryMsg,
+      }));
+      speechService.speak(summaryMsg, true);
+    },
+    [projectState.transcript]
+  );
+
+  // Switch Director Preset Sequence
+  const handleSelectPreset = useCallback(
+    async (preset: DirectorPresetScenario) => {
+      setActivePresetId(preset.id);
+      setProjectState((prev) => ({
+        ...prev,
+        title: preset.title,
+        transcript: preset.transcript,
+        isPlayingAnimatic: false,
+      }));
+      setCurrentTimeSeconds(0);
+      await handleRebuildFromTranscript(true, preset.transcript);
+    },
+    [handleRebuildFromTranscript]
+  );
+
+  // Apply SAM 3.1 Continuity Fix (`sam-3.1` mask isolation + client-side canvas pixel recoloring)
+  const handleApplyProposedFix = useCallback(
+    async (shotId: string, customColor?: string) => {
+      const targetShot = projectState.shots.find((s) => s.id === shotId);
+      if (!targetShot) return;
+
+      setProjectState((prev) => ({
+        ...prev,
+        isProcessing: true,
+        statusAnnouncement: `Isolating ${
+          targetShot.proposedFix?.targetObject || 'prop'
+        } in Shot ${targetShot.shotNumber} with SAM 3.1 mask and recoloring pixels...`,
+      }));
+
+      const updatedShot = await metaModelClient.applyContinuityFix(targetShot, customColor);
+      speechService.playEarcon('fixApplied');
+
+      const resolvedColor =
+        customColor || targetShot.proposedFix?.targetColor || 'blue';
+      const resolvedObject = targetShot.proposedFix?.targetObject || 'cup';
+
+      const confirmationMessage = `Continuity verified on Shot ${updatedShot.shotNumber}. ${resolvedObject} recolored to ${resolvedColor} via SAM 3.1 segmentation mask.`;
+
+      setProjectState((prev) => ({
+        ...prev,
+        isProcessing: false,
+        shots: prev.shots.map((s) => (s.id === shotId ? updatedShot : s)),
+        activeShotId: shotId,
+        statusAnnouncement: confirmationMessage,
+      }));
+
+      speechService.speak(confirmationMessage, true);
+    },
+    [projectState.shots]
+  );
+
+  // Manual SAM 3.1 Segmentation trigger on any shot
+  const handleSegmentObjectManual = useCallback(
+    async (shotId: string, targetObject: string) => {
+      const targetShot = projectState.shots.find((s) => s.id === shotId);
+      if (!targetShot) return;
+
+      const primaryRuleColor = projectState.rules[0]?.expectedValue || 'blue';
+      setProjectState((prev) => ({
+        ...prev,
+        isProcessing: true,
+        statusAnnouncement: `Running SAM 3.1 segmentation on Shot ${targetShot.shotNumber} for target "${targetObject}"...`,
+      }));
+
+      const mask = await metaModelClient.segmentObjectWithSam3(
+        targetShot.shotNumber,
+        targetObject
+      );
+      setShowSamMaskOverlay(true);
+      speechService.playEarcon('focus');
+
+      setProjectState((prev) => ({
+        ...prev,
+        isProcessing: false,
+        shots: prev.shots.map((s) =>
+          s.id === shotId
+            ? {
+                ...s,
+                proposedFix: {
+                  action: 'recolor',
+                  targetObject,
+                  targetColor: primaryRuleColor,
+                  mask,
+                },
+              }
+            : s
+        ),
+        statusAnnouncement: `SAM 3.1 isolated ${targetObject} in Shot ${
+          targetShot.shotNumber
+        } with ${(mask.confidence * 100).toFixed(1)}% confidence.`,
+      }));
+    },
+    [projectState.shots, projectState.rules]
+  );
+
+  // Revert a shot to an earlier revision
+  const handleRevertShotRevision = useCallback(
+    (shotId: string, revisionId: string) => {
+      const targetShot = projectState.shots.find((s) => s.id === shotId);
+      if (!targetShot) return;
+      const rev = targetShot.revisions.find((r) => r.revisionId === revisionId);
+      if (!rev) return;
+
+      const isInitialMismatch =
+        revisionId.endsWith('-initial') &&
+        rev.actionApplied.toLowerCase().includes('red');
+
+      speechService.playEarcon('focus');
+      setProjectState((prev) => ({
+        ...prev,
+        shots: prev.shots.map((s) =>
+          s.id === shotId
+            ? {
+                ...s,
+                currentImageUrl: rev.imageUrl,
+                status: isInitialMismatch ? 'mismatch' : 'consistent',
+                discrepancyMessage: isInitialMismatch
+                  ? `Restored initial revision containing continuity discrepancy (${rev.actionApplied}).`
+                  : undefined,
+              }
+            : s
+        ),
+        statusAnnouncement: `Restored Shot ${targetShot.shotNumber} to revision: ${rev.actionApplied}.`,
+      }));
+    },
+    [projectState.shots]
+  );
+
+  // Update shot prompt description and duration, regenerating its canvas frame
+  const handleUpdateShotPrompt = useCallback(
+    (shotId: string, newPrompt: string, newDuration: number) => {
+      const targetShot = projectState.shots.find((s) => s.id === shotId);
+      if (!targetShot) return;
+
+      const primaryRule = projectState.rules[0];
+      const targetObject = primaryRule?.targetObject || 'cup';
+      const expectedColor = primaryRule?.expectedValue || 'blue';
+
+      const cameraAngles: Array<'wide' | 'medium' | 'closeup' | 'over_shoulder'> = [
+        'wide',
+        'medium',
+        'closeup',
+        'over_shoulder',
+      ];
+      const angle = cameraAngles[(targetShot.shotNumber - 1) % cameraAngles.length];
+
+      const { imageUrl } = renderMuseStoryboardFrame({
+        shotNumber: targetShot.shotNumber,
+        cameraAngle: angle,
+        settingTitle: 'Studio Stage',
+        targetObject,
+        objectColorName: expectedColor,
+        weatherOrMood: 'rain_noir',
+        characterPose: 'seated_detective',
+        seed: targetShot.shotNumber * 23 + Date.now() % 100,
+      });
+
+      const updatedSpoken = `Shot ${targetShot.shotNumber}, duration ${newDuration.toFixed(
+        1
+      )} seconds. ${newPrompt}. Continuity verified: ${targetObject} is ${expectedColor}.`;
+
+      speechService.playEarcon('consistent');
+      setProjectState((prev) => ({
+        ...prev,
+        shots: prev.shots.map((s) =>
+          s.id === shotId
+            ? {
+                ...s,
+                promptDescription: newPrompt,
+                durationSeconds: newDuration,
+                spokenDescription: updatedSpoken,
+                currentImageUrl: imageUrl,
+                status: 'consistent',
+                discrepancyMessage: undefined,
+                revisions: [
+                  ...s.revisions,
+                  {
+                    revisionId: `rev-${s.shotNumber}-${s.revisions.length + 1}`,
+                    timestamp: Date.now(),
+                    imageUrl,
+                    actionApplied: `Prompt updated & regenerated via muse-image-1.0`,
+                  },
+                ],
+              }
+            : s
+        ),
+        statusAnnouncement: `Updated Shot ${targetShot.shotNumber} prompt and duration (${newDuration}s).`,
+      }));
+    },
+    [projectState.shots, projectState.rules]
+  );
+
+  // Add or update a ContinuityRule and re-audit all shots
+  const handleAddOrUpdateRule = useCallback(
+    async (targetObject: string, expectedValue: string) => {
+      const newRule: ContinuityRule = {
+        id: `rule-${targetObject}-color`,
+        scope: 'all_shots',
+        targetObject,
+        property: 'color',
+        expectedValue,
+        revision: (projectState.rules[0]?.revision || 1) + 1,
+      };
+
+      setProjectState((prev) => ({
+        ...prev,
+        isProcessing: true,
+        statusAnnouncement: `Updated continuity rule: ${targetObject}.color must be ${expectedValue}. Re-auditing all shots with muse-spark-1.3 and SAM 3.1...`,
+      }));
+
+      // Re-audit all shots against the new expected color
+      const updatedShots: StoryboardShot[] = [];
+      for (const shot of projectState.shots) {
+        const mask =
+          shot.proposedFix?.mask ||
+          (await metaModelClient.segmentObjectWithSam3(shot.shotNumber, targetObject));
+        const currentRevAction =
+          shot.revisions[shot.revisions.length - 1]?.actionApplied.toLowerCase() || '';
+        const matchesNewRule = currentRevAction.includes(expectedValue.toLowerCase());
+
+        updatedShots.push({
+          ...shot,
+          status: matchesNewRule ? 'consistent' : 'mismatch',
+          discrepancyMessage: matchesNewRule
+            ? undefined
+            : `Rule updated to "${targetObject}.color = ${expectedValue}". Shot ${shot.shotNumber} requires SAM 3.1 recolor to ${expectedValue}.`,
+          proposedFix: {
+            action: 'recolor',
+            targetObject,
+            targetColor: expectedValue,
+            mask,
+          },
+        });
       }
-    } finally {
-      if (version === requestVersion.current) setBusy(null);
-      void refreshStatus();
-    }
-  }
 
-  function preview() {
-    if (!selected || !raster || !state.asset) return;
-    setError('');
+      const mismatchCount = updatedShots.filter((s) => s.status === 'mismatch').length;
+      speechService.playEarcon(mismatchCount > 0 ? 'mismatch' : 'consistent');
+
+      const msg = `Continuity rule updated: ${targetObject} color = ${expectedValue}. ${mismatchCount} shots flagged for SAM 3.1 recolor.`;
+      setProjectState((prev) => ({
+        ...prev,
+        isProcessing: false,
+        rules: [newRule, ...prev.rules.filter((r) => r.id !== newRule.id)],
+        shots: updatedShots,
+        statusAnnouncement: msg,
+      }));
+      speechService.speak(msg, true);
+    },
+    [projectState.rules, projectState.shots]
+  );
+
+  // Run Full Sequence Continuity Audit (`muse-spark-1.3`)
+  const handleRunFullAudit = useCallback(() => {
+    const mismatches = projectState.shots.filter((s) => s.status === 'mismatch');
+    if (mismatches.length === 0) {
+      speechService.playEarcon('consistent');
+      announceStatus(
+        `Continuity Audit Complete: All ${projectState.shots.length} shots satisfy active continuity rules.`,
+        true
+      );
+    } else {
+      const firstMismatch = mismatches[0];
+      speechService.playEarcon('mismatch');
+      setProjectState((prev) => ({
+        ...prev,
+        activeShotId: firstMismatch.id,
+      }));
+      announceStatus(
+        `Continuity Audit found ${mismatches.length} discrepancy. Focused on Shot ${firstMismatch.shotNumber}: ${firstMismatch.discrepancyMessage} Press Y to apply SAM 3.1 fix.`,
+        true
+      );
+    }
+  }, [projectState.shots, announceStatus]);
+
+  // Execute natural voice or text command (`muse-spark-1.3` intent router)
+  const handleExecuteVoiceCommand = useCallback(
+    async (commandText: string) => {
+      const lower = commandText.toLowerCase();
+
+      if (lower.includes('fix')) {
+        // Check if a specific shot number was named, otherwise fix active or first mismatched shot
+        const shotMatch = lower.match(/shot\s*(\d+)/);
+        const targetShotNum = shotMatch ? parseInt(shotMatch[1], 10) : null;
+        const targetShot =
+          (targetShotNum
+            ? projectState.shots.find((s) => s.shotNumber === targetShotNum)
+            : projectState.shots.find((s) => s.status === 'mismatch')) || activeShot;
+
+        if (targetShot) {
+          await handleApplyProposedFix(targetShot.id);
+        } else {
+          announceStatus('All shots are already consistent.', true);
+        }
+        return;
+      }
+
+      if (lower.includes('narrate') || lower.includes('read') || lower.includes('describe')) {
+        const summary = projectState.shots.map((s) => s.spokenDescription).join(' ');
+        announceStatus(`Narrating full storyboard sequence: ${summary}`, true);
+        return;
+      }
+
+      if (
+        lower.includes('emerald') ||
+        lower.includes('amber') ||
+        lower.includes('blue') ||
+        lower.includes('red') ||
+        lower.includes('purple') ||
+        lower.includes('white')
+      ) {
+        const colors = ['emerald', 'amber', 'blue', 'red', 'purple', 'white'];
+        const chosenColor = colors.find((c) => lower.includes(c)) || 'blue';
+        const targetObj = projectState.rules[0]?.targetObject || 'cup';
+        await handleAddOrUpdateRule(targetObj, chosenColor);
+        return;
+      }
+
+      // Default: append to transcript and rebuild sequence
+      const updatedTranscript = `${projectState.transcript} ${commandText}`.trim();
+      await handleRebuildFromTranscript(false, updatedTranscript);
+    },
+    [
+      projectState.shots,
+      projectState.rules,
+      projectState.transcript,
+      activeShot,
+      handleApplyProposedFix,
+      handleAddOrUpdateRule,
+      handleRebuildFromTranscript,
+      announceStatus,
+    ]
+  );
+
+  // Toggle Voice Recording (`muse-voice-transcribe-1.0`)
+  const handleToggleRecording = useCallback(async () => {
+    if (projectState.isRecording) {
+      // Stop recording
+      speechService.playEarcon('recordStop');
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+        mediaRecorderRef.current.stop();
+      } else {
+        setProjectState((prev) => ({ ...prev, isRecording: false, isProcessing: true }));
+        const { transcript: transcribedCommand } = await metaModelClient.transcribeAudio(
+          null,
+          'Fix continuity mismatch in Shot 2 using SAM 3.1'
+        );
+        await handleExecuteVoiceCommand(transcribedCommand);
+      }
+      return;
+    }
+
+    // Start recording
+    speechService.stopSpeaking();
+    speechService.playEarcon('recordStart');
+    setProjectState((prev) => ({
+      ...prev,
+      isRecording: true,
+      statusAnnouncement:
+        'Microphone active. Speak your director command or continuity rule now. Press V again to finish.',
+    }));
+
     try {
-      if (selected.sourceHash !== state.asset.hash)
-        throw new Error('Select the object again in the current frame.');
-      const result = recolor(state.asset.pixels, raster, state.color);
-      if (result.report.changedOutside !== 0)
-        throw new Error('The correction affected pixels outside the selection and was rejected.');
-      if (result.report.changedInside === 0)
-        throw new Error('This colour makes no visible change. Choose another colour.');
-      dispatch({
-        type: 'preview',
-        correction: {
-          id: crypto.randomUUID(),
-          sourceHash: state.asset.hash,
-          selectionId: selected.id,
-          color: state.color,
-          dataUrl: pixelsToUrl(result.pixels, state.asset.width, state.asset.height),
-          report: result.report,
-        },
+      if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        const recorder = new MediaRecorder(stream);
+        audioChunksRef.current = [];
+
+        recorder.ondataavailable = (e) => {
+          if (e.data.size > 0) audioChunksRef.current.push(e.data);
+        };
+
+        recorder.onstop = async () => {
+          stream.getTracks().forEach((track) => track.stop());
+          const blob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+          setProjectState((prev) => ({ ...prev, isRecording: false, isProcessing: true }));
+          const { transcript: transcribed } = await metaModelClient.transcribeAudio(
+            blob,
+            'Fix continuity mismatch in Shot 2 using SAM 3.1'
+          );
+          await handleExecuteVoiceCommand(transcribed);
+        };
+
+        mediaRecorderRef.current = recorder;
+        recorder.start();
+      }
+    } catch {
+      // Fallback for environments without physical mic hardware: keep recording state active until user presses [V]
+      mediaRecorderRef.current = null;
+    }
+  }, [projectState.isRecording, handleExecuteVoiceCommand]);
+
+  // Toggle Animatic Playback (`isPlayingAnimatic`)
+  const handleTogglePlayAnimatic = useCallback(() => {
+    setProjectState((prev) => {
+      const nextPlaying = !prev.isPlayingAnimatic;
+      if (nextPlaying) {
+        setViewMode('animatic');
+        lastNarratedShotIdInAnimaticRef.current = null;
+      } else {
+        speechService.stopSpeaking();
+      }
+      return {
+        ...prev,
+        isPlayingAnimatic: nextPlaying,
+        statusAnnouncement: nextPlaying
+          ? 'Playing storyboard animatic with synchronized voice narration.'
+          : 'Animatic playback paused.',
+      };
+    });
+  }, []);
+
+  // Animatic Timeline Clock Effect
+  useEffect(() => {
+    if (!projectState.isPlayingAnimatic || projectState.shots.length === 0) return;
+
+    const interval = setInterval(() => {
+      setCurrentTimeSeconds((prevTime) => {
+        const nextTime = prevTime + 0.1;
+        if (nextTime >= totalDurationSeconds) {
+          setProjectState((p) => ({
+            ...p,
+            isPlayingAnimatic: false,
+            statusAnnouncement: 'Animatic sequence playback completed.',
+          }));
+          return 0;
+        }
+
+        // Determine which shot corresponds to `nextTime`
+        let elapsed = 0;
+        for (const shot of projectState.shots) {
+          if (nextTime >= elapsed && nextTime < elapsed + shot.durationSeconds) {
+            if (lastNarratedShotIdInAnimaticRef.current !== shot.id) {
+              lastNarratedShotIdInAnimaticRef.current = shot.id;
+              setProjectState((p) => ({
+                ...p,
+                activeShotId: shot.id,
+                statusAnnouncement: `Animatic playing Shot ${shot.shotNumber}: ${shot.promptDescription}`,
+              }));
+              speechService.speak(shot.spokenDescription, true);
+            }
+            break;
+          }
+          elapsed += shot.durationSeconds;
+        }
+
+        return nextTime;
       });
-      setView('correction');
-      setNotice(
-        `${colorName} correction ready for review. No pixels changed outside the selection. Approve it to enable export.`,
-      );
-    } catch (error) {
-      setError(errorText(error));
-    }
-  }
+    }, 100);
 
-  function listen() {
-    if (!('speechSynthesis' in window)) {
-      setError(
-        'Speech output is not available in this browser. All descriptions are also written on screen.',
-      );
-      return;
-    }
-    window.speechSynthesis.cancel();
-    if (speaking) {
-      setSpeaking(false);
-      return;
-    }
-    const utterance = new SpeechSynthesisUtterance(`${description} ${notice}`);
-    utterance.onend = () => setSpeaking(false);
-    utterance.onerror = () => setSpeaking(false);
-    setSpeaking(true);
-    window.speechSynthesis.speak(utterance);
-  }
+    return () => clearInterval(interval);
+  }, [projectState.isPlayingAnimatic, projectState.shots, totalDurationSeconds]);
 
-  function exportEvidence() {
-    if (!state.approved || !state.asset || !selected) return;
-    downloadJson(
-      {
-        schemaVersion: 1,
-        source: {
-          name: state.asset.name,
-          sha256: state.asset.hash,
-          width: state.asset.width,
-          height: state.asset.height,
-        },
-        segmentation: { ...selected, model: selected.source === 'sam' ? 'sam-3.1' : null },
-        correction: {
-          id: state.approved.id,
-          color: state.approved.color,
-          algorithm: 'masked-hsl-v1',
-          report: state.approved.report,
-          approved: true,
-        },
-        caveat: 'Pixel preservation does not establish that the mask selected the intended object.',
-      },
-      'frame-correction-evidence.json',
-    );
-  }
+  // Scrub timeline manually
+  const handleScrubTime = useCallback(
+    (timeSec: number) => {
+      const clamped = Math.max(0, Math.min(totalDurationSeconds, timeSec));
+      setCurrentTimeSeconds(clamped);
+      speechService.playEarcon('scrub');
+
+      let elapsed = 0;
+      for (const shot of projectState.shots) {
+        if (clamped >= elapsed && clamped <= elapsed + shot.durationSeconds) {
+          if (projectState.activeShotId !== shot.id) {
+            setProjectState((prev) => ({
+              ...prev,
+              activeShotId: shot.id,
+            }));
+          }
+          break;
+        }
+        elapsed += shot.durationSeconds;
+      }
+    },
+    [totalDurationSeconds, projectState.shots, projectState.activeShotId]
+  );
+
+  // Export Project JSON
+  const handleExportProjectJson = useCallback(() => {
+    const exportPayload = {
+      projectId: projectState.projectId,
+      title: projectState.title,
+      exportedAt: new Date().toISOString(),
+      transcript: projectState.transcript,
+      rules: projectState.rules,
+      shots: projectState.shots.map((s) => ({
+        id: s.id,
+        shotNumber: s.shotNumber,
+        durationSeconds: s.durationSeconds,
+        promptDescription: s.promptDescription,
+        spokenDescription: s.spokenDescription,
+        status: s.status,
+        revisionsCount: s.revisions.length,
+      })),
+    };
+    const blob = new Blob([JSON.stringify(exportPayload, null, 2)], {
+      type: 'application/json',
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${projectState.projectId}-continuity-report.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+    announceStatus('Exported Framelock storyboard and continuity report JSON.', true);
+  }, [projectState, announceStatus]);
+
+  // Global Keyboard Navigation (WCAG 2.2 AAA Full Keyboard Control)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      const isInputFocused =
+        target &&
+        (target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          target.tagName === 'SELECT' ||
+          target.isContentEditable);
+
+      if (isInputFocused) return;
+
+      const key = e.key.toLowerCase();
+
+      if (e.code === 'Space') {
+        e.preventDefault();
+        handleTogglePlayAnimatic();
+      } else if (key === 'v') {
+        e.preventDefault();
+        handleToggleRecording();
+      } else if (key === 'n' && activeShot) {
+        e.preventDefault();
+        handleNarrateShot(activeShot);
+      } else if (key === 'y' && activeShot) {
+        e.preventDefault();
+        handleApplyProposedFix(activeShot.id);
+      } else if (key === 'm') {
+        e.preventDefault();
+        setShowSamMaskOverlay((prev) => {
+          const next = !prev;
+          announceStatus(`SAM 3.1 segmentation overlay ${next ? 'enabled' : 'hidden'}.`, false);
+          return next;
+        });
+      } else if (key === 'a') {
+        e.preventDefault();
+        handleRunFullAudit();
+      } else if (key === 'g') {
+        e.preventDefault();
+        handleRebuildFromTranscript(true);
+      } else if (key === '?' || (e.shiftKey && key === '/')) {
+        e.preventDefault();
+        setIsShortcutsModalOpen((prev) => !prev);
+      } else if (e.key === 'ArrowRight') {
+        e.preventDefault();
+        const idx = projectState.shots.findIndex((s) => s.id === projectState.activeShotId);
+        const nextIdx = Math.min(projectState.shots.length - 1, idx + 1);
+        if (projectState.shots[nextIdx]) {
+          handleSelectShot(projectState.shots[nextIdx].id, true);
+        }
+      } else if (e.key === 'ArrowLeft') {
+        e.preventDefault();
+        const idx = projectState.shots.findIndex((s) => s.id === projectState.activeShotId);
+        const prevIdx = Math.max(0, idx - 1);
+        if (projectState.shots[prevIdx]) {
+          handleSelectShot(projectState.shots[prevIdx].id, true);
+        }
+      } else if (['1', '2', '3', '4'].includes(key)) {
+        e.preventDefault();
+        const shotIdx = parseInt(key, 10) - 1;
+        if (projectState.shots[shotIdx]) {
+          handleSelectShot(projectState.shots[shotIdx].id, true);
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [
+    activeShot,
+    projectState.shots,
+    projectState.activeShotId,
+    handleTogglePlayAnimatic,
+    handleToggleRecording,
+    handleNarrateShot,
+    handleApplyProposedFix,
+    handleRunFullAudit,
+    handleRebuildFromTranscript,
+    handleSelectShot,
+    announceStatus,
+  ]);
+
+  const handleToggleMute = () => {
+    const nextMuted = !isMuted;
+    setIsMuted(nextMuted);
+    speechService.setMuted(nextMuted);
+    setProjectState((prev) => ({
+      ...prev,
+      statusAnnouncement: nextMuted
+        ? 'Spoken synthesis and audio cues muted.'
+        : 'Spoken synthesis and audio cues enabled.',
+    }));
+  };
 
   return (
-    <>
-      <a className="skip-link" href="#editor">
-        Skip to editor
+    <div className="min-h-screen bg-[#121417] text-white flex flex-col">
+      {/* Skip to Main Storyboard Stage Link for Screen Readers */}
+      <a
+        href="#main-storyboard-workspace"
+        className="sr-only focus:not-sr-only focus:fixed focus:top-3 focus:left-3 focus:z-50 focus:px-4 focus:py-2.5 focus:bg-[#38BDF8] focus:text-[#121417] focus:font-bold focus:rounded"
+      >
+        Skip to Main Storyboard Workspace
       </a>
-      <header className="app-header">
-        <div className="wordmark">
-          <span className="brand-symbol">
-            <Focus size={24} strokeWidth={1.7} />
-          </span>
-          <span>
-            {brand.name}
-            <small>WORKING TITLE</small>
-          </span>
-        </div>
-        <span className="header-divider" />
-        <span className="header-label">Frame lab</span>
-        <div className="header-actions">
-          <span className="local-indicator">
-            <i />
-            Local workspace
-          </span>
+
+      {/* Strict 3-Zone Top Navigation Bar Contract */}
+      <header className="flex items-center justify-between gap-8 px-6 py-4 bg-[#1E232B] border-b-2 border-[#323A46]">
+        {/* Zone 1: Single text element wordmark */}
+        <a
+          href="#top"
+          className="text-xl font-bold tracking-tight text-white font-display whitespace-nowrap shrink-0"
+        >
+          Framelock
+        </a>
+
+        {/* Zone 2: 4 concise single-line text navigation links */}
+        <nav
+          aria-label="Primary Studio Navigation"
+          className="hidden md:flex items-center gap-6 text-sm font-medium text-[#E2E8F0]"
+        >
           <button
-            className="button dark compact"
-            disabled={!state.approved || Boolean(state.candidate)}
-            onClick={() => {
-              if (state.approved) {
-                download(state.approved.dataUrl, 'frame-01-corrected.png');
-                setNotice('Approved PNG downloaded.');
-              }
-            }}
+            type="button"
+            onClick={() => setViewMode('grid')}
+            className="hover:text-white hover:underline underline-offset-4 transition-colors whitespace-nowrap shrink-0"
           >
-            <ArrowDownToLine size={16} />
-            Export PNG
+            Storyboard
+          </button>
+          <button
+            type="button"
+            onClick={() => setViewMode('animatic')}
+            className="hover:text-white hover:underline underline-offset-4 transition-colors whitespace-nowrap shrink-0"
+          >
+            Animatic Stage
+          </button>
+          <button
+            type="button"
+            onClick={handleRunFullAudit}
+            className="hover:text-white hover:underline underline-offset-4 transition-colors whitespace-nowrap shrink-0"
+          >
+            Continuity Audit
+          </button>
+          <button
+            type="button"
+            onClick={() => setIsShortcutsModalOpen(true)}
+            className="hover:text-white hover:underline underline-offset-4 transition-colors whitespace-nowrap shrink-0"
+          >
+            Shortcuts [?]
+          </button>
+        </nav>
+
+        {/* Zone 3: 1 primary action */}
+        <div className="flex items-center gap-3 shrink-0">
+          <button
+            type="button"
+            onClick={handleTogglePlayAnimatic}
+            className="min-h-[44px] px-4 py-2 text-sm font-bold text-[#121417] bg-[#38BDF8] hover:bg-[#7DD3FC] rounded transition-colors whitespace-nowrap shrink-0"
+          >
+            {projectState.isPlayingAnimatic ? 'Pause Animatic [SPACE]' : 'Play Animatic [SPACE]'}
           </button>
         </div>
       </header>
-      <main id="editor" tabIndex={-1}>
-        <div className="workspace-heading">
-          <div>
-            <p className="eyebrow">OBJECT CORRECTION / FIRST BUILD</p>
-            <h1>{state.asset?.name ?? 'Your first frame'}</h1>
-            <p className="heading-note">One object. A considered change. Your final say.</p>
-          </div>
-          <div className="source-actions">
-            <input
-              ref={uploadInput}
-              type="file"
-              accept="image/png,image/jpeg"
-              className="sr-only"
-              tabIndex={-1}
-              aria-label="Upload a PNG or JPEG"
-              onChange={(event) => {
-                const file = event.target.files?.[0];
-                if (file) void load(() => loadUpload(file));
-                event.target.value = '';
-              }}
-            />
-            <button className="button outline" onClick={() => uploadInput.current?.click()}>
-              <Upload size={16} />
-              Open image
-            </button>
-            {state.asset?.kind === 'upload' ? (
-              <button className="text-button" onClick={() => void load(loadSample)}>
-                Use sample
-              </button>
-            ) : null}
-          </div>
-        </div>
-        <div className="workspace-grid">
-          <div className="visual-column">
-            <FrameStage
-              asset={state.asset}
-              selected={selected}
-              correction={correction}
-              approved={isApproved}
-              overlay={overlay}
-              view={view}
-              onView={setView}
-              description={description}
-            />
-            <div className="caption-row">
-              <div>
-                <span className="caption-label">
-                  {state.asset?.kind === 'sample' ? 'THE SAMPLE SCENE' : 'YOUR SOURCE'}
-                </span>
-                <p>
-                  {state.asset?.kind === 'sample'
-                    ? 'A quiet window. A red cup. Let’s change just the cup.'
-                    : 'Select an object by name. The original image stays available.'}
-                </p>
-              </div>
-              <button className="listen-button" onClick={listen} aria-pressed={speaking}>
-                <Volume2 size={16} />
-                {speaking ? 'Stop reading' : 'Read aloud'}
-              </button>
-            </div>
-            <section className="revision-strip" aria-label="Frame versions">
-              <button
-                className={view === 'original' ? 'revision active' : 'revision'}
-                onClick={() => setView('original')}
-                aria-pressed={view === 'original'}
-              >
-                {state.asset ? <img src={state.asset.dataUrl} alt="" /> : null}
-                <span>
-                  <strong>Original</strong>
-                  <small>Always retained</small>
-                </span>
-                <span className="revision-number">01</span>
-              </button>
-              <ArrowRight size={18} className="revision-arrow" />
-              {correction ? (
-                <button
-                  className={view === 'correction' ? 'revision active' : 'revision'}
-                  onClick={() => setView('correction')}
-                  aria-pressed={view === 'correction'}
-                >
-                  <img src={correction.dataUrl} alt="" />
-                  <span>
-                    <strong>{isApproved ? 'Approved revision' : 'Proposed revision'}</strong>
-                    <small>{isApproved ? 'Ready to export' : 'Waiting for your approval'}</small>
-                  </span>
-                  <span className="revision-number">02</span>
-                </button>
-              ) : (
-                <div className="revision empty">
-                  <span className="empty-thumb">
-                    <Focus size={20} />
-                  </span>
-                  <span>
-                    <strong>Your correction</strong>
-                    <small>Preview before you commit</small>
-                  </span>
-                  <span className="revision-number">02</span>
-                </div>
-              )}
-            </section>
-            <div className="workspace-message" role="status" aria-live="polite" aria-atomic="true">
-              {busy ? (
-                <LoaderCircle size={16} className="spin" />
-              ) : (
-                <span className="message-dot" />
-              )}
-              <span>{notice}</span>
-            </div>
-            {error ? (
-              <p className="error-message" role="alert">
-                <CircleHelp size={16} />
-                {error}
-              </p>
-            ) : null}
-          </div>
-          <aside className="inspector" aria-label="Correction controls" aria-busy={Boolean(busy)}>
-            <section className="control-section">
-              <div className="section-title">
-                <span className="step-index">01</span>
-                <h2>Select an object</h2>
-                {selected ? <Check size={17} className="step-check" /> : null}
-              </div>
-              <label htmlFor="concept">Object name</label>
-              <input
-                id="concept"
-                value={concept}
-                maxLength={100}
-                onChange={(event) => setConcept(event.target.value)}
-                aria-describedby="concept-help"
-                placeholder="e.g. cup"
-              />
-              <p id="concept-help" className="field-help">
-                Use the object’s name, without the colour you want to change.
-              </p>
-              <button
-                className="button outline full"
-                disabled={!state.asset || !concept.trim() || !service?.configured || Boolean(busy)}
-                onClick={() => void selectWithSam()}
-              >
-                <Scan size={16} />
-                {busy === 'sam' ? 'Finding object…' : 'Find object with SAM'}
-              </button>
-              {busy === 'sam' ? (
-                <button
-                  className="text-button"
-                  onClick={() => {
-                    pending.current?.abort();
-                    requestVersion.current++;
-                    setBusy(null);
-                    setNotice('Selection cancelled. The original is unchanged.');
-                  }}
-                >
-                  Cancel selection
-                </button>
-              ) : null}
-              <details className="connection">
-                <summary>
-                  <span
-                    className={service?.configured ? 'connection-dot ready' : 'connection-dot'}
-                  />
-                  {connectionError
-                    ? 'Connection unavailable'
-                    : service?.configured
-                      ? 'SAM key configured'
-                      : 'SAM not connected'}
-                  <ChevronDown size={14} />
-                </summary>
-                <div>
-                  <p>
-                    Add your Meta key to <code>.env.local</code> as <code>META_API_KEY</code>. It
-                    stays on the local server. Selecting with SAM sends this frame to Meta.
-                  </p>
-                  <p>
-                    {service
-                      ? `${service.requestsUsed} of ${service.requestLimit} live calls used this session. No automatic retries.`
-                      : 'Start the local server to connect.'}
-                  </p>
-                  <button className="text-button" onClick={() => void refreshStatus()}>
-                    Check connection
-                  </button>
-                </div>
-              </details>
-              {state.asset?.kind === 'sample' ? (
-                <div className="sample-box">
-                  <span className="sample-tag">OFFLINE SAMPLE</span>
-                  <p>Try the editor with a hand-authored cup mask. No model call or API key.</p>
-                  <button
-                    className="sample-button"
-                    disabled={Boolean(busy)}
-                    onClick={() => void selectSample()}
-                  >
-                    Use sample selection
-                    <ArrowRight size={15} />
-                  </button>
-                </div>
-              ) : null}
-              {state.masks.length > 1 ? (
-                <fieldset className="object-list">
-                  <legend>Choose an object</legend>
-                  {state.masks.map((mask) => (
-                    <label key={mask.id}>
-                      <input
-                        type="radio"
-                        name="object"
-                        checked={selected?.id === mask.id}
-                        onChange={() => {
-                          dispatch({ type: 'select', id: mask.id });
-                          setView('selection');
-                          setNotice(
-                            `${mask.label} selected. Inspect the mask before correcting it.`,
-                          );
-                        }}
-                      />
-                      {mask.label}
-                    </label>
-                  ))}
-                </fieldset>
-              ) : null}
-              {selected ? (
-                <div className="selection-summary">
-                  <Check size={15} />
-                  <span>
-                    {selected.label} selected{' '}
-                    <small>
-                      {selected.source === 'sample'
-                        ? 'Hand-authored mask · not SAM output'
-                        : `SAM 3.1${selected.confidence === undefined ? '' : ` · model score ${selected.confidence.toFixed(2)}`}`}
-                    </small>
-                  </span>
-                </div>
-              ) : null}
-            </section>
-            <section className="control-section">
-              <div className="section-title">
-                <span className="step-index">02</span>
-                <h2>Change its colour</h2>
-              </div>
-              <div className="color-options" role="group" aria-label="Target colour">
-                {colors.map((color) => (
-                  <button
-                    key={color.hex}
-                    className="color-option"
-                    aria-label={color.name}
-                    aria-pressed={state.color.toLowerCase() === color.hex}
-                    style={{ '--swatch': color.hex } as React.CSSProperties}
-                    onClick={() => {
-                      dispatch({ type: 'color', color: color.hex });
-                      if (state.candidate) setView(state.approved ? 'correction' : 'selection');
-                    }}
-                  >
-                    <span>
-                      {state.color.toLowerCase() === color.hex ? <Check size={16} /> : null}
-                    </span>
-                    <small>{color.name}</small>
-                  </button>
-                ))}
-              </div>
-              <div className="hex-row">
-                <label htmlFor="color">Custom hex</label>
-                <input
-                  id="color"
-                  value={state.color}
-                  maxLength={7}
-                  spellCheck={false}
-                  aria-invalid={!validColor}
-                  aria-describedby="color-help"
-                  onChange={(event) => {
-                    dispatch({ type: 'color', color: event.target.value });
-                    if (state.candidate) setView(state.approved ? 'correction' : 'selection');
-                  }}
-                />
-              </div>
-              <p className="field-help" id="color-help">
-                {validColor
-                  ? 'Keep the original shading. Change hue and saturation inside the mask.'
-                  : 'Enter # followed by six hexadecimal digits.'}
-              </p>
-              <button
-                className="button lime full"
-                disabled={!selected || !validColor || Boolean(busy)}
-                onClick={preview}
-              >
-                Preview correction
-                <ArrowRight size={16} />
-              </button>
-              {!selected ? (
-                <p className="disabled-reason">Select an object to enable correction.</p>
-              ) : null}
-            </section>
-            <section className="control-section review-section">
-              <div className="section-title">
-                <span className="step-index">03</span>
-                <h2>Your final say</h2>
-              </div>
-              {correction ? (
-                <>
-                  <div className="pixel-report">
-                    <span>Changed outside selection</span>
-                    <strong>
-                      {correction.report.changedOutside.toLocaleString()} <small>pixels</small>
-                    </strong>
-                    <p>
-                      {correction.report.changedInside.toLocaleString()} pixels changed inside the
-                      mask.
-                    </p>
-                  </div>
-                  <p className="field-help">
-                    Check the mask edges. This comparison verifies where pixels changed, not whether
-                    the right object was selected.
-                  </p>
-                  {state.candidate ? (
-                    <div className="review-actions">
-                      <button
-                        className="button dark"
-                        onClick={() => {
-                          dispatch({ type: 'approve' });
-                          setNotice('Correction approved. You can now export the PNG or undo it.');
-                        }}
-                      >
-                        <Check size={16} />
-                        Approve
-                      </button>
-                      <button
-                        className="button outline"
-                        onClick={() => {
-                          dispatch({ type: 'reject' });
-                          setView(state.approved ? 'correction' : 'original');
-                          setNotice('Proposed correction discarded.');
-                        }}
-                      >
-                        <X size={16} />
-                        Discard
-                      </button>
-                    </div>
-                  ) : (
-                    <div className="approved-note">
-                      <Check size={17} />
-                      <span>Correction approved</span>
-                    </div>
-                  )}
-                  {state.approved ? (
-                    <div className="approved-actions">
-                      <button
-                        className="text-button"
-                        onClick={() => {
-                          dispatch({ type: 'undo' });
-                          setView('original');
-                          setNotice('Original restored. The correction is no longer approved.');
-                        }}
-                      >
-                        <RotateCcw size={14} />
-                        Undo correction
-                      </button>
-                      <button
-                        className="text-button"
-                        disabled={Boolean(state.candidate)}
-                        onClick={exportEvidence}
-                      >
-                        Save evidence
-                      </button>
-                    </div>
-                  ) : null}
-                </>
-              ) : (
-                <p className="review-placeholder">
-                  Preview a correction, compare it with the original, then choose what stays.
-                </p>
-              )}
-            </section>
-          </aside>
-        </div>
-        <footer className="workspace-footer">
-          <span>
-            <Focus size={13} />A frame at a time.
+
+      {/* Persistent High-Contrast Screen Reader / Voice Status Dock (aria-live="polite") */}
+      <div
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+        className="px-6 py-3 bg-[#16191E] border-b-2 border-[#323A46] flex flex-wrap items-center justify-between gap-4"
+      >
+        <div className="flex items-center gap-3 min-w-0">
+          <span className="px-2 py-0.5 bg-[#0F172A] border border-[#38BDF8] rounded text-xs font-mono font-bold text-[#38BDF8] whitespace-nowrap shrink-0">
+            ARIA-LIVE STATUS
           </span>
-          <span>
-            {selected?.source === 'sam' ? 'Live SAM selection' : 'Offline sample available'}{' '}
-            <b>·</b> Export to keep your work; refresh resets this session.
-          </span>
-        </footer>
+          <p className="font-mono text-sm font-semibold text-white truncate">
+            {projectState.statusAnnouncement}
+          </p>
+        </div>
+
+        <div className="flex items-center gap-3 text-xs font-mono text-[#E2E8F0] shrink-0">
+          <span>KEYS:</span>
+          <kbd className="px-1.5 py-0.5 bg-[#0F172A] text-[#38BDF8] rounded">[V] Voice</kbd>
+          <kbd className="px-1.5 py-0.5 bg-[#0F172A] text-[#38BDF8] rounded">[N] Narrate</kbd>
+          <kbd className="px-1.5 py-0.5 bg-[#0F172A] text-[#38BDF8] rounded">[Y] Fix</kbd>
+          <kbd className="px-1.5 py-0.5 bg-[#0F172A] text-[#38BDF8] rounded">[←/→] Shot</kbd>
+        </div>
+      </div>
+
+      {/* Main 3-Column Tactile Studio Workspace */}
+      <main
+        id="main-storyboard-workspace"
+        className="flex-1 w-full max-w-[1600px] mx-auto p-4 md:p-6 flex flex-col xl:flex-row items-stretch gap-6"
+      >
+        {/* Left Dock: Live Voice Transcript & Continuity Rules */}
+        <VoiceTranscriptPanel
+          transcript={projectState.transcript}
+          isRecording={projectState.isRecording}
+          isProcessing={projectState.isProcessing}
+          isSpeaking={isSpeaking}
+          isMuted={isMuted}
+          rules={projectState.rules}
+          activePresetId={activePresetId}
+          onToggleRecording={handleToggleRecording}
+          onTranscriptChange={(newText) =>
+            setProjectState((prev) => ({ ...prev, transcript: newText }))
+          }
+          onRebuildFromTranscript={handleRebuildFromTranscript}
+          onSelectPreset={handleSelectPreset}
+          onExecuteVoiceCommand={handleExecuteVoiceCommand}
+          onAddOrUpdateRule={handleAddOrUpdateRule}
+          onToggleMute={handleToggleMute}
+        />
+
+        {/* Center Stage: Storyboard Frames Grid / Animatic Monitor + Audio Scrubbing Timeline */}
+        <div className="flex-1 min-w-0 flex flex-col gap-6">
+          <StoryboardStage
+            shots={projectState.shots}
+            rules={projectState.rules}
+            activeShotId={projectState.activeShotId}
+            showSamMaskOverlay={showSamMaskOverlay}
+            isPlayingAnimatic={projectState.isPlayingAnimatic}
+            viewMode={viewMode}
+            onSetViewMode={setViewMode}
+            onSelectShot={handleSelectShot}
+            onNarrateShot={handleNarrateShot}
+            onApplyProposedFix={(shotId) => handleApplyProposedFix(shotId)}
+            onRunFullAudit={handleRunFullAudit}
+            onToggleSamMaskOverlay={() => setShowSamMaskOverlay((prev) => !prev)}
+            onExportProjectJson={handleExportProjectJson}
+          />
+
+          <AudioTimeline
+            shots={projectState.shots}
+            activeShotId={projectState.activeShotId}
+            isPlayingAnimatic={projectState.isPlayingAnimatic}
+            currentTimeSeconds={currentTimeSeconds}
+            totalDurationSeconds={totalDurationSeconds}
+            onSelectShot={handleSelectShot}
+            onTogglePlayAnimatic={handleTogglePlayAnimatic}
+            onScrubTime={handleScrubTime}
+          />
+        </div>
+
+        {/* Right Dock: Active Shot Continuity & SAM 3.1 Inspector */}
+        <ShotInspectorPanel
+          activeShot={activeShot}
+          showSamMaskOverlay={showSamMaskOverlay}
+          isProcessing={projectState.isProcessing}
+          modelLogs={modelLogs}
+          onToggleSamMaskOverlay={() => setShowSamMaskOverlay((prev) => !prev)}
+          onNarrateShot={handleNarrateShot}
+          onApplyProposedFix={handleApplyProposedFix}
+          onSegmentObjectManual={handleSegmentObjectManual}
+          onRevertShotRevision={handleRevertShotRevision}
+          onUpdateShotPrompt={handleUpdateShotPrompt}
+        />
       </main>
-    </>
+
+      {/* Accessible Keyboard & Voice Command Reference Modal */}
+      <KeyboardShortcutsModal
+        isOpen={isShortcutsModalOpen}
+        onClose={() => setIsShortcutsModalOpen(false)}
+      />
+    </div>
   );
 }

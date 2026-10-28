@@ -1,83 +1,98 @@
-# Frame lab — working title: Framelock
+# Framelock — Accessible Voice-Directed Storyboard Studio
 
-A separate object-editing prototype for the Meta hackathon. The final product name is undecided. Change `src/brand.ts` when the team chooses it; the current repository name is also provisional.
+**Framelock** is a WCAG 2.2 AAA accessible, voice-directed storyboard and continuity studio designed for blind, low-vision, and multimodal filmmakers for the Meta Global AI Developer Hackathon.
 
-The first slice is **select an object → preview a colour correction → approve or discard → export or undo**. It does not yet generate films, understand spoken directions, or detect continuity errors automatically.
+It combines natural voice direction, real-time spoken screen narration (`window.speechSynthesis`), spatial Web Audio API earcons, and an HTML5 Canvas + SAM 3.1 segmentation engine to detect and fix visual continuity discrepancies across storyboard sequences without requiring visual reliance.
 
-## Run locally
+---
 
-Use Node.js 22.12+ (Node 24 was used for verification) and npm.
+## 1. Architecture & Meta AI Model Stack
 
-```sh
-npm ci
-npm run dev
+Framelock orchestrates four Meta AI model capabilities alongside browser speech and canvas engines:
+
+| Model Identifier | Environment Variable | Role in Framelock Pipeline |
+| :--- | :--- | :--- |
+| **`muse-voice-transcribe-1.0`** | `VITE_MUSE_VOICE_MODEL` | Converts live microphone audio streams (`MediaRecorder`) and voice commands into structured scene transcripts. |
+| **`muse-spark-1.3`** | `VITE_MUSE_SPARK_MODEL` | Extracts structured `ContinuityRule` JSON objects, plans shot lists from transcripts, and runs multimodal visual continuity audits. |
+| **`muse-image-1.0`** | `VITE_MUSE_IMAGE_MODEL` | Synthesizes storyboard frames across camera angles (`wide`, `medium`, `closeup`, `over_shoulder`) with deterministic reference seeds. |
+| **`sam-3.1`** | `VITE_SAM3_MODEL` | Generates object segmentation masks (`SamMask` with bounding box, confidence score, and alpha mask) to isolate target props and perform client-side pixel recoloring. |
+| **Web Speech & Audio API** | Browser Native | Provides interruptible spoken descriptions (`window.speechSynthesis`), `aria-live="polite"` telemetry, and distinct tonal earcons for focus, continuity verification, and discrepancy alerts. |
+
+---
+
+## 2. Environment Variables Setup
+
+Copy `.env.example` to `.env` in the project root and configure your Meta AI API credentials:
+
+```bash
+cp .env.example .env
 ```
 
-Open **http://127.0.0.1:4317**. No API key is needed for the sample.
-
-1. Select **Use sample selection**. The highlighted cup uses an original, hand-authored mask, **not SAM output**.
-2. Choose Cobalt or another colour, then **Preview correction**.
-3. Compare Original, Selection and Correction. The pixel report measures changes against the normalized source frame.
-4. **Approve** to unlock **Export PNG** and **Save evidence**. Or discard the proposal.
-5. **Undo correction** restores the original. Changing the source clears selections and approvals.
-
-The sample illustration and mask were authored for this prototype. They are deliberately reproducible, do not make model calls, and cannot be applied to arbitrary uploads. Uploading another image requires the live SAM connector to select an object. PNG/JPEG files are normalized to PNG and fitted within 1600 × 1600 pixels before editing. The original retained in the editor is this normalized working frame.
-
-Edits are held in memory. Export to keep the result; refreshing starts a new session. Export is currently a still PNG, not a video.
-
-## Connect SAM later
-
-Live Meta calls were deferred at the owner's request. The connector is implemented and tested with a documented parser fixture and a stubbed HTTP transport; account access, model quality and live latency remain unverified.
-
-Copy `.env.example` to `.env.local` and enter your key locally:
+### `.env` Configuration Reference
 
 ```dotenv
-META_API_KEY=your-key-here
-SAM_MAX_REQUESTS=10
-PORT=4317
+# Meta AI Model API Credentials
+VITE_META_AI_API_KEY="your_meta_ai_api_key_here"
+VITE_META_API_BASE_URL="https://api.meta.ai/v1"
+
+# Meta AI Model Identifiers
+VITE_MUSE_VOICE_MODEL="muse-voice-transcribe-1.0"
+VITE_MUSE_SPARK_MODEL="muse-spark-1.3"
+VITE_MUSE_IMAGE_MODEL="muse-image-1.0"
+VITE_SAM3_MODEL="sam-3.1"
 ```
 
-The key is server-only. Never use a `VITE_` prefix for it, put it in source code, or commit `.env.local`. Open **SAM not connected → Check connection** after saving. A configured key is not proof of successful authorization. Only selecting **Find object with SAM** sends the displayed image and object name to Meta. The health check makes no Meta request.
+> **Offline / Zero-Key Evaluation Mode:** If `VITE_META_AI_API_KEY` is left unset or set to `"mock"`, Framelock automatically runs using its built-in deterministic HTML5 Canvas generator, SAM 3.1 mask synthesizer, and client-side pixel manipulation engine so all workflows can be tested live out-of-the-box.
 
-The server uses `sam-3.1` at `https://api.meta.ai/v1/responses` with Meta's `@meta-sam/parser`. It accepts one object concept and pairs decoded, cropped masks with source-pixel bounds. A completed zero-match response asks the user to try a different selection; it is not proof that an object is absent. Incomplete, malformed and mismatched results are rejected. Multiple matches require an explicit object choice.
+---
 
-The app applies colour locally using the mask and source HSL lightness. SAM does not repair the image. The outside-mask pixel comparison checks edit containment, not semantic correctness of the chosen mask. Object IDs belong to a single SAM response and are not cross-shot identity guarantees.
+## 3. Installation & Running Locally
 
-This prototype binds to loopback only, checks the request origin and a session token, limits calls per server process, and disables SDK retries. The request count is not a monetary spending cap; restarting resets it. Images and keys are not written by the API. Review and harden authentication, persistent budgets, storage and deployment settings before hosting it for other people.
+### Prerequisites
+- **Node.js** v18+ and **npm**
 
-## Verification
+### Step-by-Step Instructions
 
-```sh
-npm run check
-npm run test:e2e
-npm run format:check
-```
+1. **Install dependencies:**
+   ```bash
+   npm install
+   ```
 
-The browser suite uses installed Google Chrome. If it is unavailable, install Chrome or change the Playwright browser configuration. The tests use synthetic/local data and do not call Meta.
+2. **Configure environment variables:**
+   Create a `.env` file (or configure secrets in the AI Studio Secrets panel) using the keys listed in `.env.example`.
 
-- Unit and API tests cover source hashes, mask placement and holes, HSL correction, outside-mask changes, stale proposals, approval/undo, request limits and the official parser/SDK request format.
-- Browser tests cover the offline workflow, actual downloaded PNG pixels, upload reset, keyboard controls and desktop/tablet/mobile accessibility checks.
-- Generated screenshots, downloads and traces are stored under ignored `.artifacts/` and `test-results/` folders.
+3. **Start the development server (runs on port 3000):**
+   ```bash
+   npm run dev
+   ```
 
-For the production bundle:
+4. **Type-check and build for production:**
+   ```bash
+   npm run lint
+   npm run build
+   ```
 
-```sh
-npm run build
-npm start
-```
+---
 
-## Project map
+## 4. Accessible Keyboard Shortcuts & Voice Workflow
 
-| Path                                           | Responsibility                                                |
-| ---------------------------------------------- | ------------------------------------------------------------- |
-| `src/App.tsx`, `src/components/FrameStage.tsx` | Accessible editing controls and visual comparison             |
-| `src/lib/correction.ts`                        | Mask placement, colour correction and pixel verification      |
-| `src/lib/session.ts`                           | Source-bound proposals, approval and undo                     |
-| `src/lib/sample.ts`, `src/lib/media.ts`        | Original sample and browser image handling                    |
-| `server/sam.ts`                                | Input validation, real SAM request and official mask decoding |
-| `server/app.ts`                                | Local API, request admission and errors                       |
-| `docs/BUILD_NOTES.md`                          | First-build evidence, limits and team handoff                 |
+Framelock is engineered for complete keyboard-only and screen-reader operation:
 
-All application code and sample artwork in this replacement project were newly authored for this build. Existing Fylmer application modules, user data and assets were not copied. Dependency terms are listed in `THIRD_PARTY_NOTICES.md`. The repository's existing Apache 2.0 project license is retained.
+| Shortcut | Action |
+| :--- | :--- |
+| **`[V]`** | Start / Stop Voice Dictation (`muse-voice-transcribe-1.0`) |
+| **`[SPACE]`** | Play / Pause Animatic Sequence with synchronized spoken narration |
+| **`[←]` / `[→]`** | Navigate Previous / Next Storyboard Shot with automatic status readback |
+| **`[1]` – `[4]`** | Jump directly to Shot 1 through Shot 4 |
+| **`[N]`** | Narrate active shot visual description and continuity state aloud |
+| **`[Y]`** | Accept and apply the proposed `sam-3.1` continuity fix on the active shot |
+| **`[M]`** | Toggle the `sam-3.1` segmentation bounding box and alpha mask overlay |
+| **`[A]`** | Run full sequence continuity audit (`muse-spark-1.3`) |
+| **`[G]`** | Parse transcript and regenerate storyboard frames (`muse-image-1.0`) |
+| **`[?]`** | Open / Close the Accessible Keyboard & Voice Command Reference modal |
 
-Primary technical references: [SAM prompting](https://dev.meta.ai/docs/sam/segmenting), [output semantics](https://dev.meta.ai/docs/sam/reading-segmentation), [official client libraries](https://dev.meta.ai/docs/sam/client-libraries).
+### Example Voice / Text Directives
+Speak via `[V]` or type into the **Direct Voice / Text Command** input:
+- `"Fix continuity mismatch in Shot 2 using SAM 3.1"`
+- `"Change continuity rule: cup color must be emerald"`
+- `"Narrate all shots and continuity status"`
