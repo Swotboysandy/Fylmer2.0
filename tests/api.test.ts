@@ -245,5 +245,51 @@ describe('Role 2: SAM 3.1 maskRef, neutral object selection, track storage & amb
 
     expect(resolveRes.status).toBe(200);
     expect(resolveRes.body.track.status).toBe('consistent');
+
+    // 4. Verify stale track invalidation when ruleRevision increments
+    const nextRevRes = await request(app)
+      .post('/api/segment/check')
+      .set('X-Anchorshot-Session', health.body.sessionToken)
+      .send({
+        ...body,
+        shotNumber: 4,
+        ruleRevision: 3,
+        confidence: 0.96,
+        expectedValue: 'emerald',
+        observedValue: 'emerald',
+      });
+    expect(nextRevRes.status).toBe(200);
+    expect(nextRevRes.body.maskRef).toBe('sam-3.1:cup:0:v3');
+    expect(nextRevRes.body.provenance).toBe('offline-fixture');
+
+    const tracksAfterRev = await request(app).get('/api/masks?concept=cup&shotNumber=4');
+    expect(tracksAfterRev.body.tracks).toHaveLength(1);
+    expect(tracksAfterRev.body.tracks[0].maskRef).toBe('sam-3.1:cup:0:v3');
+  });
+
+  it('serves /api/muse/transcribe and /api/muse/spark with ruleRevision increments and provenance', async () => {
+    const app = createApp({ settings: () => ({ key: '', requestLimit: 10 }) });
+    const health = await request(app).get('/api/health');
+
+    const transRes = await request(app)
+      .post('/api/muse/transcribe')
+      .set('X-Anchorshot-Session', health.body.sessionToken)
+      .send({ text: 'The courier jacket must remain emerald.' });
+    expect(transRes.status).toBe(200);
+    expect(transRes.body.model).toBe('muse-voice-transcribe-1.0');
+    expect(transRes.body.provenance).toBe('offline-fixture');
+
+    const sparkRes = await request(app)
+      .post('/api/muse/spark')
+      .set('X-Anchorshot-Session', health.body.sessionToken)
+      .send({ transcript: transRes.body.transcript, previousRevision: 2 });
+    expect(sparkRes.status).toBe(200);
+    expect(sparkRes.body.model).toBe('muse-spark-1.3');
+    expect(sparkRes.body.ruleRevision).toBe(3);
+    expect(sparkRes.body.rules[0]).toMatchObject({
+      targetObject: 'jacket',
+      expectedValue: 'emerald',
+      revision: 3,
+    });
   });
 });

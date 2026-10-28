@@ -146,6 +146,7 @@ export async function decodeSelection(
     selectedObjectId: check.selectedObjectId,
     ambiguityStatus: check.status,
     evidence: check.explanation,
+    provenance: 'live-sam-3.1',
   };
 }
 
@@ -317,6 +318,30 @@ export class MaskTrackStore {
     this.tracks.set(maskRef, updated);
     return updated;
   }
+
+  /**
+   * Invalidates stale tracks for a shot when the underlying frame `sourceHash`
+   * or `ruleRevision` changes (per BUILD_NOTES.md invariant).
+   */
+  public invalidateBySourceOrRule(
+    shotNumber: number,
+    newSourceHash?: string,
+    newRuleRevision?: number,
+  ): number {
+    let removed = 0;
+    for (const [key, track] of this.tracks.entries()) {
+      if (track.shotNumber !== shotNumber) continue;
+      const hashChanged = Boolean(newSourceHash && track.sourceHash !== newSourceHash);
+      const revChanged = Boolean(
+        newRuleRevision !== undefined && track.revision < newRuleRevision,
+      );
+      if (hashChanged || revChanged) {
+        this.tracks.delete(key);
+        removed++;
+      }
+    }
+    return removed;
+  }
 }
 
 const OFFLINE_SAM_WIRE =
@@ -343,8 +368,10 @@ export async function decodeOfflineSamSelection(
     const decoded = await decodeSelection(createOfflineSamWireEvents(), input, revision);
     decoded.objects = decoded.objects.map((obj) => ({
       ...obj,
+      source: 'sample' as const,
       confidence,
     }));
+    decoded.provenance = 'offline-fixture';
     return decoded;
   }
   const requestId = randomUUID();
@@ -358,7 +385,7 @@ export async function decodeOfflineSamSelection(
     maskRef,
     objectId: '0',
     label: `${input.concept} 0`,
-    source: 'sam',
+    source: 'sample',
     sourceHash: input.sourceHash,
     width: input.width,
     height: input.height,
@@ -377,6 +404,7 @@ export async function decodeOfflineSamSelection(
     selectedObjectId: '0',
     ambiguityStatus: check.status,
     evidence: check.explanation,
+    provenance: 'offline-fixture',
   };
 }
 

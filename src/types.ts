@@ -77,6 +77,7 @@ export interface StoredMaskTrack {
   sourceHash: string;
   status: ContinuityEvidenceStatus;
   evidence: string;
+  provenance?: 'live-sam-3.1' | 'offline-fixture';
   createdAt: number;
 }
 
@@ -88,4 +89,5 @@ export interface SegmentationResult {
   selectedObjectId?: string | null;
   ambiguityStatus?: ContinuityEvidenceStatus;
   evidence?: string;
+  provenance?: 'live-sam-3.1' | 'offline-fixture';
 }
