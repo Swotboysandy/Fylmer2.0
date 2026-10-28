@@ -7,7 +7,7 @@ import {
   StoryboardShot,
 } from '../types/framelock';
 import {
-  applySamPixelFixToImage,
+  applySamPixelFixWithVerification,
   generateSam3MaskData,
   getTargetObjectBox,
   renderMuseStoryboardFrame,
@@ -373,10 +373,9 @@ export class MetaModelClient {
       mask = await this.segmentObjectWithSam3(shot.shotNumber, targetObject);
     }
 
-    const updatedImageUrl = await applySamPixelFixToImage(
+    const { imageUrl: updatedImageUrl, verification } = await applySamPixelFixWithVerification(
       shot.currentImageUrl,
-      mask.box,
-      targetObject,
+      mask,
       targetColor
     );
 
@@ -390,6 +389,7 @@ export class MetaModelClient {
       revisionId: `rev-${shot.shotNumber}-${shot.revisions.length + 1}`,
       timestamp: Date.now(),
       imageUrl: updatedImageUrl,
+      pixelVerification: verification,
       actionApplied: `SAM 3.1 masked recolor: ${targetObject} → ${targetColor}`,
     };
 

@@ -45,6 +45,7 @@ export interface StoryboardShot {
     timestamp: number;
     imageUrl: string;
     actionApplied: string;
+    pixelVerification?: import('../services/maskIntegrity').MaskVerificationReport;
   }>;
 }
 
