@@ -65,14 +65,11 @@ class AccessibleAudioService {
       utterance.volume = 1.0;
 
       const voices = window.speechSynthesis.getVoices();
-      const preferredVoice = voices.find(
-        (v) =>
-          v.lang.startsWith('en') &&
-          (v.name.includes('Natural') || v.name.includes('Google') || v.name.includes('Samantha') || v.default)
-      );
-      if (preferredVoice) {
-        utterance.voice = preferredVoice;
-      }
+      const localVoices = voices.filter(voice => voice.localService);
+      const preferredVoice = localVoices.find(voice => voice.lang.startsWith('en')) || localVoices[0];
+      // Offline mode must never fall back to a remote speech service.
+      if (!preferredVoice) return;
+      utterance.voice = preferredVoice;
 
       utterance.onstart = () => this.onSpeakingChange?.(true);
       utterance.onend = () => this.onSpeakingChange?.(false);

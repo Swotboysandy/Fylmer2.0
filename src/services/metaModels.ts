@@ -58,23 +58,19 @@ export interface MetaApiEnvConfig {
 }
 
 export function getMetaApiEnvConfig(): MetaApiEnvConfig {
-  const env = (import.meta as unknown as { env?: Record<string, string | undefined> }).env || {};
-  const apiKey = env.VITE_META_AI_API_KEY || '';
-  const baseUrl = env.VITE_META_API_BASE_URL || 'https://api.meta.ai/v1';
-
-  const isLiveConfigured =
-    Boolean(apiKey) &&
-    apiKey !== 'your_meta_ai_api_key_here' &&
-    apiKey !== 'mock';
+  // This branch is deliberately offline; keys never enter the browser client.
+  const apiKey = '';
+  const baseUrl = '';
+  const isLiveConfigured = false;
 
   return {
     apiKey,
     baseUrl,
     models: {
-      voiceTranscribe: env.VITE_MUSE_VOICE_MODEL || 'muse-voice-transcribe-1.0',
-      spark: env.VITE_MUSE_SPARK_MODEL || 'muse-spark-1.3',
-      image: env.VITE_MUSE_IMAGE_MODEL || 'muse-image-1.0',
-      sam: env.VITE_SAM3_MODEL || 'sam-3.1',
+      voiceTranscribe: 'muse-voice-transcribe-1.0',
+      spark: 'muse-spark-1.3',
+      image: 'muse-image-1.0',
+      sam: 'sam-3.1',
     },
     isLiveConfigured,
   };
@@ -87,8 +83,7 @@ export function getMetaApiEnvConfig(): MetaApiEnvConfig {
  * 2. muse-spark-1.3
  * 3. muse-image-1.0
  * 4. sam-3.1
- * Reads configuration from VITE_META_* environment variables with automatic
- * fallback to deterministic local HTML5 Canvas & fixture execution.
+ * Executes deterministic local Canvas fixtures only. Live credentials are ignored.
  */
 export class MetaModelClient {
   private logs: ModelInvocationRecord[] = [];
@@ -380,7 +375,7 @@ export class MetaModelClient {
     this.recordCall(
       'sam-3.1',
       `segmentObject("${targetObject}", Shot ${shotNumber})`,
-      `Generated maskRef ${mask.maskRef} [box: ${box.x}%,${box.y}% ${box.width}x${box.height}%, IoU conf: ${(mask.confidence * 100).toFixed(1)}%]`
+      `Generated maskRef ${mask.maskRef} [box: ${box.x}%,${box.y}% ${box.width}x${box.height}%, fixture confidence: ${(mask.confidence * 100).toFixed(1)}%]`
     );
 
     return mask;
@@ -413,10 +408,8 @@ export class MetaModelClient {
     const { imageUrl: updatedImageUrl, pixelVerification } =
       await applySamPixelFixWithVerification(
         shot.currentImageUrl,
-        mask.box,
-        targetObject,
+        mask,
         targetColor,
-        mask.maskRef,
         ruleRevision
       );
 

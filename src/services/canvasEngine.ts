@@ -1,3 +1,4 @@
+import { recolorMaskedPixels, type MaskVerificationReport } from './maskIntegrity';
 import { BoundingBox, PixelVerificationReport, SamMask, StoryboardShot } from '../types/framelock';
 
 export interface SceneRenderSpec {
@@ -401,7 +402,7 @@ function drawTargetObjectInBox(
 }
 
 /**
- * Generates a real binary/alpha segmentation mask dataURL (`SamMask`) for `sam-3.1`.
+ * Generates an offline fixture alpha mask. This is not a live SAM inference result.
  */
 export function generateSam3MaskData(
   objectId: string,
@@ -505,6 +506,10 @@ export function verifyMaskedPixelDiff(
   const outsideDriftPercent = Number(((changedOutsideMask / outsidePixels) * 100).toFixed(4));
 
   return {
+    selectedPixels: selectedMaskPixels,
+    changedInside: changedInsideMask,
+    changedOutside: changedOutsideMask,
+    passed: selectedMaskPixels > 0 && changedOutsideMask === 0,
     maskRef,
     ruleRevision,
     totalPixels,
@@ -516,131 +521,100 @@ export function verifyMaskedPixelDiff(
   };
 }
 
-/**
- * Client-side HTML5 Canvas Pixel Manipulation (`sam-3.1` + `muse-image-1.0` Inpaint/Recolor)
- * with pixel-diff verification proving 0 outside-mask pixel drift.
- */
-export async function applySamPixelFixWithVerification(
-  sourceImageUrl: string,
-  box: BoundingBox,
-  targetObject: string,
-  targetColorName: string,
-  maskRef: string = `sam-3.1:${targetObject}:v1`,
-  ruleRevision: number = 1
-): Promise<{ imageUrl: string; pixelVerification: PixelVerificationReport }> {
-  return new Promise((resolve) => {
-    const img = new Image();
-    img.crossOrigin = 'anonymous';
-    img.onload = () => {
-      const width = img.width || 800;
-      const height = img.height || 450;
-      const canvas = document.createElement('canvas');
-      canvas.width = width;
-      canvas.height = height;
-      const ctx = canvas.getContext('2d')!;
-
-      // 1. Draw original frame and snapshot full-frame RGBA pixels BEFORE edit
-      ctx.drawImage(img, 0, 0, width, height);
-      const beforeFrame = ctx.getImageData(0, 0, width, height).data.slice();
-
-      // 2. Isolate the SAM 3.1 bounding box region and perform pixel-level HSV/RGB recoloring
-      const pxBox = {
-        x: Math.floor((box.x / 100) * width),
-        y: Math.floor((box.y / 100) * height),
-        w: Math.floor((box.width / 100) * width),
-        h: Math.floor((box.height / 100) * height),
-      };
-
-      const imageData = ctx.getImageData(pxBox.x, pxBox.y, pxBox.w, pxBox.h);
-      const data = imageData.data;
-      const targetPalette = resolveColorPalette(targetColorName);
-      const [tr, tg, tb] = targetPalette.rgb;
-
-      for (let i = 0; i < data.length; i += 4) {
-        const r = data[i];
-        const g = data[i + 1];
-        const b = data[i + 2];
-        const max = Math.max(r, g, b);
-        const min = Math.min(r, g, b);
-        const saturation = max === 0 ? 0 : (max - min) / max;
-        const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
-
-        // Recolor saturated prop pixels while preserving white highlights and dark shadows
-        if (saturation > 0.22 && luminance > 0.12 && luminance < 0.92) {
-          const factor = Math.min(1.35, Math.max(0.45, luminance * 1.45));
-          data[i] = Math.min(255, Math.round(tr * factor));
-          data[i + 1] = Math.min(255, Math.round(tg * factor));
-          data[i + 2] = Math.min(255, Math.round(tb * factor));
-        }
-      }
-      ctx.putImageData(imageData, pxBox.x, pxBox.y);
-
-      // 3. Strictly clip to SAM 3.1 mask box before rendering vector prop geometry so 0 outside pixels can drift
-      ctx.save();
-      ctx.beginPath();
-      ctx.rect(pxBox.x, pxBox.y, pxBox.w, pxBox.h);
-      ctx.clip();
-      drawTargetObjectInBox(ctx, pxBox, targetObject, targetColorName);
-      ctx.restore();
-
-      // 4. Snapshot full-frame RGBA pixels AFTER edit and compute pixel-diff proof
-      const afterFrame = ctx.getImageData(0, 0, width, height).data;
-      const pixelVerification = verifyMaskedPixelDiff(
-        beforeFrame,
-        afterFrame,
-        width,
-        height,
-        box,
-        maskRef,
-        ruleRevision
-      );
-
-      resolve({
-        imageUrl: canvas.toDataURL('image/png'),
-        pixelVerification,
-      });
-    };
-    img.onerror = () => {
-      resolve({
-        imageUrl: sourceImageUrl,
-        pixelVerification: {
-          maskRef,
-          ruleRevision,
-          totalPixels: 800 * 450,
-          selectedMaskPixels: Math.round((box.width / 100) * (box.height / 100) * 800 * 450),
-          changedInsideMask: Math.round((box.width / 100) * (box.height / 100) * 800 * 450 * 0.64),
-          changedOutsideMask: 0,
-          outsideDriftPercent: 0,
-          verifiedAt: Date.now(),
-        },
-      });
-    };
-    img.src = sourceImageUrl;
-  });
+async function decodeFrame(url: string): Promise<HTMLImageElement> {
+  const image = new Image();
+  image.crossOrigin = 'anonymous';
+  image.src = url;
+  try {
+    await image.decode();
+  } catch {
+    throw new Error('Could not decode the frame or mask. No correction was applied.');
+  }
+  return image;
 }
 
-/**
- * Backward-compatible wrapper returning the updated image DataURL string.
- */
+export async function applySamPixelFixWithVerification(
+  sourceImageUrl: string,
+  mask: SamMask,
+  targetColorName: string,
+  ruleRevision: number = 1
+): Promise<{
+  imageUrl: string;
+  verification: PixelVerificationReport;
+  pixelVerification: PixelVerificationReport;
+}> {
+  const [image, maskImage] = await Promise.all([
+    decodeFrame(sourceImageUrl),
+    decodeFrame(mask.maskBase64),
+  ]);
+  const width = image.naturalWidth;
+  const height = image.naturalHeight;
+  if (
+    !width ||
+    !height ||
+    width * height > 24000000 ||
+    maskImage.naturalWidth !== width ||
+    maskImage.naturalHeight !== height
+  ) {
+    throw new Error('Frame and mask dimensions must match. No correction was applied.');
+  }
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const context = canvas.getContext('2d', { willReadFrequently: true });
+  if (!context) throw new Error('Canvas pixel access is unavailable.');
+  context.drawImage(image, 0, 0);
+  const source = context.getImageData(0, 0, width, height);
+  context.clearRect(0, 0, width, height);
+  context.drawImage(maskImage, 0, 0);
+  const maskRgba = context.getImageData(0, 0, width, height).data;
+  // The current mask format uses a transparent background and nonzero alpha for selection.
+  const binaryMask = new Uint8Array(width * height);
+  for (let pixel = 0; pixel < binaryMask.length; pixel++) {
+    binaryMask[pixel] = maskRgba[pixel * 4 + 3] > 0 ? 1 : 0;
+  }
+  const { pixels, verification } = recolorMaskedPixels(
+    source.data,
+    binaryMask,
+    resolveColorPalette(targetColorName).rgb
+  );
+  source.data.set(pixels);
+  context.putImageData(source, 0, 0);
+
+  const totalPixels = width * height;
+  const outsidePixels = Math.max(1, totalPixels - verification.selectedPixels);
+  const outsideDriftPercent = Number(
+    ((verification.changedOutside / outsidePixels) * 100).toFixed(4)
+  );
+  const pixelVerification: PixelVerificationReport = {
+    ...verification,
+    maskRef: mask.maskRef || mask.id,
+    ruleRevision,
+    totalPixels,
+    selectedMaskPixels: verification.selectedPixels,
+    changedInsideMask: verification.changedInside,
+    changedOutsideMask: verification.changedOutside,
+    outsideDriftPercent,
+    verifiedAt: Date.now(),
+  };
+
+  return {
+    imageUrl: canvas.toDataURL('image/png'),
+    verification: pixelVerification,
+    pixelVerification,
+  };
+}
+
 export async function applySamPixelFixToImage(
   sourceImageUrl: string,
   box: BoundingBox,
   targetObject: string,
   targetColorName: string
 ): Promise<string> {
-  const result = await applySamPixelFixWithVerification(
-    sourceImageUrl,
-    box,
-    targetObject,
-    targetColorName
-  );
-  return result.imageUrl;
+  const mask = generateSam3MaskData(targetObject, box);
+  return (await applySamPixelFixWithVerification(sourceImageUrl, mask, targetColorName)).imageUrl;
 }
 
-/**
- * Exports the 4-shot storyboard animatic sequence into a downloadable WebM video file
- * using HTML5 Canvas `captureStream(30)` + `MediaRecorder` (Role 3 Video Export Deliverable).
- */
 export async function exportStoryboardAnimaticVideo(
   shots: StoryboardShot[],
   projectTitle: string
@@ -659,7 +633,6 @@ export async function exportStoryboardAnimaticVideo(
     return null;
   }
 
-  // Preload all shot images
   const loadedImages: HTMLImageElement[] = await Promise.all(
     shots.map(
       (shot) =>
@@ -710,7 +683,6 @@ export async function exportStoryboardAnimaticVideo(
         ctx.drawImage(img, 0, 0, width, height);
       }
 
-      // Burned-in AnchorShot Telemetry & Caption Strip
       ctx.fillStyle = 'rgba(15, 23, 42, 0.88)';
       ctx.fillRect(0, height - 68, width, 68);
       ctx.strokeStyle = '#38BDF8';

@@ -1,3 +1,5 @@
+import type { MaskVerificationReport } from '../services/maskIntegrity';
+
 export type RuleStatus = 'consistent' | 'mismatch' | 'uncertain';
 
 export interface ContinuityRule {
@@ -23,9 +25,10 @@ export interface SamMask {
   maskBase64: string; // Binary/RLE mask canvas data
   box: BoundingBox;
   confidence: number;
+  provenance?: 'offline-fixture' | 'live-sam-3.1';
 }
 
-export interface PixelVerificationReport {
+export interface PixelVerificationReport extends MaskVerificationReport {
   maskRef: string;
   ruleRevision: number;
   totalPixels: number;
@@ -52,6 +55,7 @@ export interface StoryboardShot {
     targetObject: string;
     targetColor: string;
     mask?: SamMask;
+    candidates?: SamMask[];
   };
   revisions: Array<{
     revisionId: string;
@@ -89,6 +93,7 @@ export interface ModelInvocationRecord {
   operation: string;
   timestamp: number;
   summary: string;
+  provenance?: 'offline-fixture' | 'live-meta-api';
 }
 
 export interface DirectorPresetScenario {
