@@ -1,2 +1,2 @@
-// Provisional identity. Change here when the team chooses the final name.
-export const brand = { name: 'Framelock', descriptor: 'Frame lab', provisional: true };
+// App identity confirmed by the team.
+export const brand = { name: 'Anchorshot', descriptor: 'Frame lab', provisional: false };

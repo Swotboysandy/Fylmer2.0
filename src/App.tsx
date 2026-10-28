@@ -31,7 +31,7 @@ export default function App() {
     isPlayingAnimatic: false,
     isProcessing: true,
     statusAnnouncement:
-      'Framelock Studio initialized. Loading Sequence 01: Midnight Diner Rain and running continuity audit.',
+      'Anchorshot Studio initialized. Loading Sequence 01: Midnight Diner Rain and running continuity audit.',
   });
 
   const [activePresetId, setActivePresetId] = useState<string>(initialPreset.id);
@@ -699,7 +699,7 @@ export default function App() {
     a.download = `${projectState.projectId}-continuity-report.json`;
     a.click();
     URL.revokeObjectURL(url);
-    announceStatus('Exported Framelock storyboard and continuity report JSON.', true);
+    announceStatus('Exported Anchorshot storyboard and continuity report JSON.', true);
   }, [projectState, announceStatus, transitionsEnabled, reducedMotion]);
 
   // Global Keyboard Navigation (WCAG 2.2 AAA Full Keyboard Control)
@@ -813,7 +813,7 @@ export default function App() {
           href="#top"
           className="text-xl font-bold tracking-tight text-white font-display whitespace-nowrap shrink-0"
         >
-          Framelock
+          Anchorshot
         </a>
 
         {/* Zone 2: 4 concise single-line text navigation links */}
