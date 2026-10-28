@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { AnimatePresence, MotionConfig, motion, useReducedMotion } from 'motion/react';
 import {
   ArrowDownToLine,
   ArrowLeft,
@@ -58,6 +59,14 @@ export default function DreamStudio() {
   const position = timelineAt(time),
     active = position.blend > 0.5 && !plan.reducedMotion ? position.next : position.index;
   const recording = progress !== null;
+  const prefersReducedMotion = useReducedMotion();
+  const quiet = plan.reducedMotion || prefersReducedMotion;
+  const uiTransition = { duration: quiet ? 0 : 0.2, ease: [0.23, 1, 0.32, 1] as const };
+  const reveal = {
+    initial: { opacity: quiet ? 1 : 0, transform: quiet ? 'none' : 'translateY(6px)' },
+    animate: { opacity: 1, transform: 'translateY(0px)' },
+    transition: uiTransition,
+  };
   const thumbs = useMemo(
     () => assets?.worlds.map((world) => world.toDataURL('image/jpeg', 0.8)) ?? [],
     [assets],
@@ -183,309 +192,330 @@ export default function DreamStudio() {
     setNotice('Dream plan downloaded. It includes the sample asset provenance.');
   }
   return (
-    <div className="dream-studio">
-      <a className="dream-skip" href="#dream-workspace">
-        Skip to dream editor
-      </a>
-      <header className="dream-header">
-        <a href="/" className="dream-brand">
-          <span>
-            <Focus size={22} />
-          </span>
-          {brand.name}
-          <small>WORKING TITLE</small>
+    <MotionConfig reducedMotion="user">
+      <div className="dream-studio">
+        <a className="dream-skip" href="#dream-workspace">
+          Skip to dream editor
         </a>
-        <span className="dream-header-divider" />
-        <span className="dream-section-name">Dream lab</span>
-        <span className="dream-branch">EXPERIMENT</span>
-        <a className="dream-back" href="/">
-          <ArrowLeft size={14} />
-          Frame lab
-        </a>
-      </header>
-      <main id="dream-workspace" className="dream-main" tabIndex={-1}>
-        <div className="dream-heading">
-          <div>
-            <p className="dream-eyebrow">STORY STUDY / 001</p>
-            <h1>A door into the impossible.</h1>
-            <p>A familiar object. Three unfamiliar worlds.</p>
-          </div>
-          <span className="dream-saved">
-            <span />
-            {saved ? 'Plan saved on this device' : 'Plan stays in this session'}
-          </span>
-        </div>
-        <div className="dream-layout">
-          <aside className="dream-sidebar" aria-label="Dream direction">
-            <fieldset disabled={recording} className="dream-controls">
-              <legend className="sr-only">Dream settings</legend>
-              <section className="dream-panel">
-                <div className="dream-panel-title">
-                  <span>01</span>
-                  <h2>Remember the dream</h2>
-                </div>
-                <label htmlFor="dream-story">Your dream notes</label>
-                <textarea
-                  id="dream-story"
-                  maxLength={2000}
-                  rows={6}
-                  value={plan.story}
-                  onChange={(e) => update('story', e.target.value)}
-                  aria-describedby="dream-notes-help"
-                />
-                <p id="dream-notes-help" className="dream-help">
-                  Notes save with your plan. This preview uses the three sample worlds below; it
-                  doesn’t generate images from your words yet.
-                </p>
-              </section>
-              <section className="dream-panel">
-                <div className="dream-panel-title">
-                  <span>02</span>
-                  <h2>Choose what stays</h2>
-                </div>
-                <label className="dream-anchor">
-                  <span className="dream-anchor-thumb">
-                    {assets ? <img src={anchorUrl} alt="" /> : <Focus size={20} />}
+        <header className="dream-header">
+          <a href="/" className="dream-brand">
+            <span>
+              <Focus size={22} />
+            </span>
+            {brand.name}
+            <small>WORKING TITLE</small>
+          </a>
+          <span className="dream-header-divider" />
+          <span className="dream-section-name">Dream lab</span>
+          <span className="dream-branch">EXPERIMENT</span>
+          <a className="dream-back" href="/">
+            <ArrowLeft size={14} />
+            Frame lab
+          </a>
+        </header>
+        <main id="dream-workspace" className="dream-main" tabIndex={-1}>
+          <motion.div className="dream-heading" {...reveal}>
+            <div>
+              <p className="dream-eyebrow">STORY STUDY / 001</p>
+              <h1>A door into the impossible.</h1>
+              <p>A familiar object. Three unfamiliar worlds.</p>
+            </div>
+            <span className="dream-saved">
+              <span />
+              {saved ? 'Plan saved on this device' : 'Plan stays in this session'}
+            </span>
+          </motion.div>
+          <div className="dream-layout">
+            <motion.aside
+              className="dream-sidebar"
+              aria-label="Dream direction"
+              {...reveal}
+              transition={{ ...uiTransition, delay: quiet ? 0 : 0.04 }}
+            >
+              <fieldset disabled={recording} className="dream-controls">
+                <legend className="sr-only">Dream settings</legend>
+                <section className="dream-panel">
+                  <div className="dream-panel-title">
+                    <span>01</span>
+                    <h2>Remember the dream</h2>
+                  </div>
+                  <label htmlFor="dream-story">Your dream notes</label>
+                  <textarea
+                    id="dream-story"
+                    maxLength={2000}
+                    rows={6}
+                    value={plan.story}
+                    onChange={(e) => update('story', e.target.value)}
+                    aria-describedby="dream-notes-help"
+                  />
+                  <p id="dream-notes-help" className="dream-help">
+                    Notes save with your plan. This preview uses the three sample worlds below; it
+                    doesn’t generate images from your words yet.
+                  </p>
+                </section>
+                <section className="dream-panel">
+                  <div className="dream-panel-title">
+                    <span>02</span>
+                    <h2>Choose what stays</h2>
+                  </div>
+                  <label className="dream-anchor">
+                    <span className="dream-anchor-thumb">
+                      {assets ? <img src={anchorUrl} alt="" /> : <Focus size={20} />}
+                    </span>
+                    <span>
+                      <strong>The red mug</strong>
+                      <small>One cutout, held in place</small>
+                    </span>
+                    <input
+                      type="checkbox"
+                      checked={plan.anchor}
+                      onChange={(e) => update('anchor', e.target.checked)}
+                      aria-label="Keep the red mug"
+                    />
+                  </label>
+                  <p className="dream-help">
+                    The sample mask comes from Frame lab. Live SAM selection has not been used.
+                  </p>
+                </section>
+                <section className="dream-panel">
+                  <div className="dream-panel-title">
+                    <span>03</span>
+                    <h2>Let the world change</h2>
+                  </div>
+                  <div className="dream-transition" role="group" aria-label="Scene transition">
+                    <button
+                      aria-pressed={plan.transition === 'doorway'}
+                      onClick={() => update('transition', 'doorway')}
+                    >
+                      <span className="doorway-icon" />
+                      Doorway
+                    </button>
+                    <button
+                      aria-pressed={plan.transition === 'dissolve'}
+                      onClick={() => update('transition', 'dissolve')}
+                    >
+                      <Sparkles size={17} />
+                      Dissolve
+                    </button>
+                  </div>
+                  <label className="dream-motion">
+                    <input
+                      type="checkbox"
+                      checked={plan.reducedMotion}
+                      onChange={(e) => {
+                        setPlaying(false);
+                        update('reducedMotion', e.target.checked);
+                      }}
+                    />
+                    Gentle playback
+                  </label>
+                  <p className="dream-help">
+                    {plan.reducedMotion
+                      ? 'Scenes switch with still cuts. Sweeping reveals and water motion are off.'
+                      : 'A doorway opens into the next world. The mug stays in the foreground.'}
+                  </p>
+                </section>
+              </fieldset>
+              <div className="dream-sample-note">
+                <span>OFFLINE ANIMATION STUDY</span>
+                <p>Original sample artwork and layered transitions. No AI video or Meta calls.</p>
+              </div>
+            </motion.aside>
+            <div className="dream-film-column">
+              <motion.section
+                className="dream-player"
+                aria-label="Dream film preview"
+                {...reveal}
+                transition={{ ...uiTransition, delay: quiet ? 0 : 0.08 }}
+              >
+                <div className="dream-player-header">
+                  <span>
+                    <Film size={13} />
+                    DREAM JOURNEY
                   </span>
                   <span>
-                    <strong>The red mug</strong>
-                    <small>One cutout, held in place</small>
+                    {String(active + 1).padStart(2, '0')} / 03 <b>·</b> {SCENES[active].place}
                   </span>
-                  <input
-                    type="checkbox"
-                    checked={plan.anchor}
-                    onChange={(e) => update('anchor', e.target.checked)}
-                    aria-label="Keep the red mug"
-                  />
-                </label>
-                <p className="dream-help">
-                  The sample mask comes from Frame lab. Live SAM selection has not been used.
-                </p>
-              </section>
-              <section className="dream-panel">
-                <div className="dream-panel-title">
-                  <span>03</span>
-                  <h2>Let the world change</h2>
                 </div>
-                <div className="dream-transition" role="group" aria-label="Scene transition">
-                  <button
-                    aria-pressed={plan.transition === 'doorway'}
-                    onClick={() => update('transition', 'doorway')}
+                <div className="dream-canvas-wrap">
+                  <canvas
+                    ref={canvas}
+                    width={W}
+                    height={H}
+                    role="img"
+                    aria-label={`Offline dream illustration: ${SCENES[active].place}. ${plan.anchor ? 'The same red mug cutout stays in the foreground.' : 'The mug is hidden.'}`}
                   >
-                    <span className="doorway-icon" />
-                    Doorway
-                  </button>
-                  <button
-                    aria-pressed={plan.transition === 'dissolve'}
-                    onClick={() => update('transition', 'dissolve')}
-                  >
-                    <Sparkles size={17} />
-                    Dissolve
-                  </button>
+                    <p>{plan.captions[active]}</p>
+                  </canvas>
+                  {!assets ? (
+                    <div className="dream-loading">
+                      <LoaderCircle className="spin" />
+                      Preparing sample worlds…
+                    </div>
+                  ) : null}
+                  <span className="dream-anchor-badge">
+                    {plan.anchor ? <LockKeyhole size={12} /> : <Focus size={12} />}{' '}
+                    {plan.anchor ? 'Mug anchored' : 'World only'}
+                  </span>
+                  <span className="dream-study-badge">SAMPLE VISUALS</span>
                 </div>
-                <label className="dream-motion">
-                  <input
-                    type="checkbox"
-                    checked={plan.reducedMotion}
-                    onChange={(e) => {
-                      setPlaying(false);
-                      update('reducedMotion', e.target.checked);
+                <div className="dream-transport">
+                  <button
+                    className="dream-play"
+                    disabled={!assets || recording}
+                    aria-label={playing ? 'Pause dream' : 'Play dream'}
+                    onClick={() => {
+                      if (time >= DURATION) {
+                        clock.current = 0;
+                        setTime(0);
+                      }
+                      setPlaying((p) => !p);
                     }}
-                  />
-                  Gentle playback
-                </label>
-                <p className="dream-help">
-                  {plan.reducedMotion
-                    ? 'Scenes switch with still cuts. Sweeping reveals and water motion are off.'
-                    : 'A doorway opens into the next world. The mug stays in the foreground.'}
-                </p>
-              </section>
-            </fieldset>
-            <div className="dream-sample-note">
-              <span>OFFLINE ANIMATION STUDY</span>
-              <p>Original sample artwork and layered transitions. No AI video or Meta calls.</p>
-            </div>
-          </aside>
-          <div className="dream-film-column">
-            <section className="dream-player" aria-label="Dream film preview">
-              <div className="dream-player-header">
-                <span>
-                  <Film size={13} />
-                  DREAM JOURNEY
-                </span>
-                <span>
-                  {String(active + 1).padStart(2, '0')} / 03 <b>·</b> {SCENES[active].place}
-                </span>
-              </div>
-              <div className="dream-canvas-wrap">
-                <canvas
-                  ref={canvas}
-                  width={W}
-                  height={H}
-                  role="img"
-                  aria-label={`Offline dream illustration: ${SCENES[active].place}. ${plan.anchor ? 'The same red mug cutout stays in the foreground.' : 'The mug is hidden.'}`}
-                >
-                  <p>{plan.captions[active]}</p>
-                </canvas>
-                {!assets ? (
-                  <div className="dream-loading">
-                    <LoaderCircle className="spin" />
-                    Preparing sample worlds…
-                  </div>
-                ) : null}
-                <span className="dream-anchor-badge">
-                  {plan.anchor ? <LockKeyhole size={12} /> : <Focus size={12} />}{' '}
-                  {plan.anchor ? 'Mug anchored' : 'World only'}
-                </span>
-                <span className="dream-study-badge">SAMPLE VISUALS</span>
-              </div>
-              <div className="dream-transport">
-                <button
-                  className="dream-play"
-                  disabled={!assets || recording}
-                  aria-label={playing ? 'Pause dream' : 'Play dream'}
-                  onClick={() => {
-                    if (time >= DURATION) {
-                      clock.current = 0;
-                      setTime(0);
-                    }
-                    setPlaying((p) => !p);
-                  }}
-                >
-                  {playing ? <Pause size={18} /> : <Play size={18} />}
-                </button>
-                <button
-                  className="dream-reset"
-                  aria-label="Restart dream"
-                  disabled={recording}
-                  onClick={() => seek(0)}
-                >
-                  <RotateCcw size={16} />
-                </button>
-                <label className="sr-only" htmlFor="dream-time">
-                  Dream playhead
-                </label>
-                <input
-                  id="dream-time"
-                  type="range"
-                  min={0}
-                  max={DURATION}
-                  step={0.05}
-                  value={time}
-                  disabled={recording}
-                  onChange={(e) => seek(Number(e.target.value))}
-                  aria-valuetext={`${time.toFixed(1)} seconds of 20`}
-                />
-                <span className="dream-time">
-                  {clockLabel(time)} <b>/ 00:20</b>
-                </span>
-              </div>
-            </section>
-            <div className="dream-scene-heading">
-              <h2>Your three worlds</h2>
-              <span>Choose a scene to jump. Edit its caption below.</span>
-            </div>
-            <div className="dream-scenes">
-              {SCENES.map((scene, index) => (
-                <article
-                  className={`dream-scene ${active === index ? 'is-active' : ''}`}
-                  key={scene.id}
-                >
-                  <button
-                    onClick={() => seek((index * DURATION) / 3)}
-                    disabled={recording}
-                    aria-label={`Show ${scene.place}`}
-                    aria-pressed={active === index}
                   >
-                    <div className="dream-scene-thumb">
-                      {thumbs[index] ? <img src={thumbs[index]} alt="" /> : null}
-                      <span>{String(index + 1).padStart(2, '0')}</span>
-                      {active === index ? <span className="dream-now">ON SCREEN</span> : null}
-                    </div>
-                    <div className="dream-scene-title">
-                      <strong>{scene.place}</strong>
-                      <small>{scene.title}</small>
-                    </div>
+                    {playing ? <Pause size={18} /> : <Play size={18} />}
                   </button>
-                  <label htmlFor={`caption-${index}`} className="sr-only">
-                    Caption for {scene.place}
+                  <button
+                    className="dream-reset"
+                    aria-label="Restart dream"
+                    disabled={recording}
+                    onClick={() => seek(0)}
+                  >
+                    <RotateCcw size={16} />
+                  </button>
+                  <label className="sr-only" htmlFor="dream-time">
+                    Dream playhead
                   </label>
-                  <textarea
-                    id={`caption-${index}`}
-                    value={plan.captions[index]}
-                    rows={3}
-                    maxLength={160}
+                  <input
+                    id="dream-time"
+                    type="range"
+                    min={0}
+                    max={DURATION}
+                    step={0.05}
+                    value={time}
                     disabled={recording}
-                    onChange={(e) => {
-                      const next = [...plan.captions];
-                      next[index] = e.target.value;
-                      update('captions', next);
-                    }}
+                    onChange={(e) => seek(Number(e.target.value))}
+                    aria-valuetext={`${time.toFixed(1)} seconds of 20`}
                   />
-                </article>
-              ))}
+                  <span className="dream-time">
+                    {clockLabel(time)} <b>/ 00:20</b>
+                  </span>
+                </div>
+              </motion.section>
+              <div className="dream-scene-heading">
+                <h2>Your three worlds</h2>
+                <span>Choose a scene to jump. Edit its caption below.</span>
+              </div>
+              <div className="dream-scenes">
+                {SCENES.map((scene, index) => (
+                  <motion.article
+                    className={`dream-scene ${active === index ? 'is-active' : ''}`}
+                    key={scene.id}
+                    animate={{ borderColor: active === index ? '#a5ba7b' : '#3c4c3c' }}
+                    transition={uiTransition}
+                  >
+                    <button
+                      onClick={() => seek((index * DURATION) / 3)}
+                      disabled={recording}
+                      aria-label={`Show ${scene.place}`}
+                      aria-pressed={active === index}
+                    >
+                      <div className="dream-scene-thumb">
+                        {thumbs[index] ? <img src={thumbs[index]} alt="" /> : null}
+                        <span>{String(index + 1).padStart(2, '0')}</span>
+                        {active === index ? <span className="dream-now">ON SCREEN</span> : null}
+                      </div>
+                      <div className="dream-scene-title">
+                        <strong>{scene.place}</strong>
+                        <small>{scene.title}</small>
+                      </div>
+                    </button>
+                    <label htmlFor={`caption-${index}`} className="sr-only">
+                      Caption for {scene.place}
+                    </label>
+                    <textarea
+                      id={`caption-${index}`}
+                      value={plan.captions[index]}
+                      rows={3}
+                      maxLength={160}
+                      disabled={recording}
+                      onChange={(e) => {
+                        const next = [...plan.captions];
+                        next[index] = e.target.value;
+                        update('captions', next);
+                      }}
+                    />
+                  </motion.article>
+                ))}
+              </div>
+              <section className="dream-delivery" aria-label="Save your dream">
+                <div>
+                  <p className="dream-eyebrow">KEEP THE DREAM</p>
+                  <h2>Take this little world with you.</h2>
+                  <p>Download the 20-second silent preview, a still, or your editable plan.</p>
+                </div>
+                <div className="dream-export-actions">
+                  <button
+                    className="dream-button primary"
+                    onClick={() => void exportFilm()}
+                    disabled={!assets || recording}
+                  >
+                    <ArrowDownToLine size={16} />
+                    {recording ? `Recording ${Math.round(progress! * 100)}%` : 'Export WebM'}
+                  </button>
+                  <button
+                    className="dream-button"
+                    disabled={!assets || recording}
+                    onClick={() => {
+                      if (canvas.current)
+                        download(canvas.current.toDataURL('image/png'), 'dream-frame.png');
+                    }}
+                  >
+                    Save frame
+                  </button>
+                  <button className="dream-button" onClick={savePlan} disabled={recording}>
+                    Save plan
+                  </button>
+                </div>
+              </section>
+              <AnimatePresence initial={false}>
+                {recording ? (
+                  <motion.div
+                    key="export-progress"
+                    className="dream-recording"
+                    {...reveal}
+                    exit={{ opacity: 0, transform: quiet ? 'none' : 'translateY(6px)' }}
+                  >
+                    <progress value={progress!} max={1} aria-label="Video export progress" />
+                    <span>Keep this tab visible while the film records.</span>
+                    <button className="dream-button" onClick={() => exportAbort.current?.abort()}>
+                      <X size={14} />
+                      Cancel export
+                    </button>
+                  </motion.div>
+                ) : null}
+              </AnimatePresence>
+              <div className="dream-status" role="status" aria-live="polite">
+                <Check size={14} />
+                {notice}
+              </div>
+              {error ? (
+                <p className="dream-error" role="alert">
+                  {error}
+                </p>
+              ) : null}
             </div>
-            <section className="dream-delivery" aria-label="Save your dream">
-              <div>
-                <p className="dream-eyebrow">KEEP THE DREAM</p>
-                <h2>Take this little world with you.</h2>
-                <p>Download the 20-second silent preview, a still, or your editable plan.</p>
-              </div>
-              <div className="dream-export-actions">
-                <button
-                  className="dream-button primary"
-                  onClick={() => void exportFilm()}
-                  disabled={!assets || recording}
-                >
-                  <ArrowDownToLine size={16} />
-                  {recording ? `Recording ${Math.round(progress! * 100)}%` : 'Export WebM'}
-                </button>
-                <button
-                  className="dream-button"
-                  disabled={!assets || recording}
-                  onClick={() => {
-                    if (canvas.current)
-                      download(canvas.current.toDataURL('image/png'), 'dream-frame.png');
-                  }}
-                >
-                  Save frame
-                </button>
-                <button className="dream-button" onClick={savePlan} disabled={recording}>
-                  Save plan
-                </button>
-              </div>
-            </section>
-            {recording ? (
-              <div className="dream-recording">
-                <progress value={progress!} max={1} aria-label="Video export progress" />
-                <span>Keep this tab visible while the film records.</span>
-                <button className="dream-button" onClick={() => exportAbort.current?.abort()}>
-                  <X size={14} />
-                  Cancel export
-                </button>
-              </div>
-            ) : null}
-            <div className="dream-status" role="status" aria-live="polite">
-              <Check size={14} />
-              {notice}
-            </div>
-            {error ? (
-              <p className="dream-error" role="alert">
-                {error}
-              </p>
-            ) : null}
           </div>
-        </div>
-        <footer className="dream-footer">
-          <span>
-            <Focus size={13} />
-            Framelock / working title
-          </span>
-          <span>
-            Dream experiment <b>·</b> Built for discussion before a merge
-          </span>
-        </footer>
-      </main>
-    </div>
+          <footer className="dream-footer">
+            <span>
+              <Focus size={13} />
+              Framelock / working title
+            </span>
+            <span>
+              Dream experiment <b>·</b> Built for discussion before a merge
+            </span>
+          </footer>
+        </main>
+      </div>
+    </MotionConfig>
   );
 }

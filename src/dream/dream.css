@@ -1010,3 +1010,116 @@
     transition: none !important;
   }
 }
+
+/* Editorial type scale: expressive titles, readable editing controls. */
+.dream-studio {
+  --dream-font-body: 'DM Sans', sans-serif;
+  --dream-font-display: 'Newsreader', Georgia, serif;
+  font-family: var(--dream-font-body);
+  font-synthesis: none;
+  -webkit-font-smoothing: antialiased;
+}
+.dream-studio button,
+.dream-studio input,
+.dream-studio textarea {
+  font-family: var(--dream-font-body);
+}
+.dream-heading h1 {
+  font-family: var(--dream-font-display);
+  font-size: clamp(36px, 3.5vw, 52px);
+  line-height: 1.08;
+  letter-spacing: -0.035em;
+  text-wrap: balance;
+}
+.dream-heading p:last-child {
+  font-size: 14px;
+  line-height: 1.6;
+}
+.dream-panel-title h2,
+.dream-scene-heading h2 {
+  font-size: 14px;
+  font-weight: 600;
+}
+.dream-studio label,
+.dream-button,
+.dream-transition button {
+  font-size: 12px;
+}
+.dream-studio textarea {
+  font-size: 14px;
+  line-height: 1.65;
+}
+.dream-help,
+.dream-sample-note p,
+.dream-delivery p:last-child,
+.dream-status {
+  font-size: 12px;
+  line-height: 1.65;
+}
+.dream-scene-title strong {
+  font-size: 14px;
+  line-height: 1.35;
+}
+.dream-scene-title small,
+.dream-scene-heading > span {
+  font-size: 11px;
+  line-height: 1.5;
+}
+.dream-scene textarea {
+  font-size: 12px;
+  min-height: 106px;
+}
+.dream-delivery h2 {
+  font-family: var(--dream-font-display);
+  font-size: 28px;
+  line-height: 1.2;
+}
+.dream-time {
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.dream-heading h1,
+.dream-delivery h2 {
+  font-optical-sizing: auto;
+}
+@media (max-width: 800px) and (min-width: 521px) {
+  .dream-controls {
+    grid-template-columns: 1fr;
+  }
+  .dream-panel {
+    border-right: 0;
+    border-bottom: 1px solid var(--dream-line);
+  }
+  .dream-anchor-thumb {
+    display: grid;
+  }
+  .dream-anchor input {
+    margin-left: auto;
+  }
+}
+@media (max-width: 520px) {
+  .dream-heading h1 {
+    max-width: 330px;
+  }
+  .dream-studio textarea {
+    font-size: 16px;
+  }
+  .dream-scene {
+    grid-template-columns: 1fr;
+  }
+  .dream-scene-thumb {
+    aspect-ratio: 2.5;
+  }
+  .dream-scene textarea {
+    min-height: 96px;
+    height: auto;
+    border-left: 0;
+    border-top: 1px solid var(--dream-line);
+  }
+  .dream-scene-title {
+    padding: 12px;
+  }
+  .dream-delivery h2 {
+    font-size: 26px;
+  }
+}
