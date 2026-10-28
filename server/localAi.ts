@@ -55,7 +55,9 @@ export function createLocalAi(root: string, launch = spawn) {
     if (!ID.test(id) || !jobs.has(id) || !assets.has(file) || jobs.get(id)?.status !== 'completed') {
       res.status(404).end(); return;
     }
-    res.sendFile(path.join(output, id, file));
+    res.sendFile(path.resolve(output, id, file), {dotfiles: 'allow'}, (err) => {
+      if (err && !res.headersSent) res.status(404).end();
+    });
   });
   function stop(reason: string) {
     if (!active) return;
@@ -120,6 +122,7 @@ export function createLocalAi(root: string, launch = spawn) {
 
 export function localAiPlugin(): Plugin {
   return {name: 'anchorshot-local-ai', configureServer(server) {
+    if (server.config.server.middlewareMode) return;
     const service = createLocalAi(server.config.root);
     server.middlewares.use('/api/local-ai', service.app);
     server.httpServer?.once('close', () => service.stop('Local server stopped.'));

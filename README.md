@@ -86,6 +86,7 @@ Anchorshot is engineered for complete keyboard-only and screen-reader operation:
 | **`[1]` – `[4]`** | Jump directly to Shot 1 through Shot 4 |
 | **`[N]`** | Narrate active shot visual description and continuity state aloud |
 | **`[Y]`** | Accept and apply the proposed `sam-3.1` continuity fix on the active shot |
+| **`[B]`** | Compare Before / After `sam-3.1` repair (0 outside-mask pixel drift) |
 | **`[M]`** | Toggle the `sam-3.1` segmentation bounding box and alpha mask overlay |
 | **`[A]`** | Run full sequence continuity audit (`muse-spark-1.3`) |
 | **`[G]`** | Parse transcript and regenerate storyboard frames (`muse-image-1.0`) |

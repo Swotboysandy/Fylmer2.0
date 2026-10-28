@@ -9,6 +9,7 @@ export interface Bounds {
 }
 export interface ObjectMask {
   id: string;
+  maskRef?: string;
   objectId: string;
   label: string;
   source: 'sample' | 'sam';
@@ -51,8 +52,42 @@ export interface ServiceStatus {
   requestsUsed: number;
   requestLimit: number;
 }
+export type ContinuityEvidenceStatus = 'consistent' | 'mismatch' | 'uncertain';
+
+export interface SamCheckEvidence {
+  status: ContinuityEvidenceStatus;
+  maskRef: string | null;
+  selectedObjectId: string | null;
+  candidateCount: number;
+  confidence: number;
+  expectedValue?: string;
+  observedValue?: string;
+  explanation: string;
+  isAmbiguous: boolean;
+}
+
+export interface StoredMaskTrack {
+  maskRef: string;
+  concept: string;
+  shotNumber: number;
+  revision: number;
+  objectId: string;
+  bounds: Bounds;
+  confidence: number;
+  sourceHash: string;
+  status: ContinuityEvidenceStatus;
+  evidence: string;
+  provenance?: 'live-sam-3.1' | 'offline-fixture';
+  createdAt: number;
+}
+
 export interface SegmentationResult {
   requestId: string;
   sourceHash: string;
   objects: ObjectMask[];
+  maskRef?: string;
+  selectedObjectId?: string | null;
+  ambiguityStatus?: ContinuityEvidenceStatus;
+  evidence?: string;
+  provenance?: 'live-sam-3.1' | 'offline-fixture';
 }

@@ -13,6 +13,7 @@ const SHORTCUT_ITEMS = [
   { key: '[1] – [4]', action: 'Jump Directly to Shot 1 through Shot 4' },
   { key: '[N]', action: 'Narrate Active Shot Visual Description & Continuity State (`speechSynthesis`)' },
   { key: '[Y]', action: 'Accept & Apply Proposed SAM 3.1 Continuity Fix on Active Shot' },
+  { key: '[B]', action: 'Compare Before / After SAM 3.1 Repair (0 Outside-Mask Drift)' },
   { key: '[M]', action: 'Toggle SAM 3.1 Segmentation Bounding Box & Alpha Mask Overlay' },
   { key: '[A]', action: 'Run Full Sequence Continuity Audit (`muse-spark-1.3`)' },
   { key: '[G]', action: 'Regenerate Storyboard Sequence from Current Transcript (`muse-image-1.0`)' },

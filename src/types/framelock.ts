@@ -1,3 +1,5 @@
+import type { MaskVerificationReport } from '../services/maskIntegrity';
+
 export type RuleStatus = 'consistent' | 'mismatch' | 'uncertain';
 
 export interface ContinuityRule {
@@ -18,10 +20,23 @@ export interface BoundingBox {
 
 export interface SamMask {
   id: string;
+  maskRef: string; // Versioned SAM 3.1 mask reference, e.g. "sam-3.1:cup-shot-2:v1"
   objectId: string;
   maskBase64: string; // Binary/RLE mask canvas data
   box: BoundingBox;
   confidence: number;
+  provenance?: 'offline-fixture' | 'live-sam-3.1';
+}
+
+export interface PixelVerificationReport extends MaskVerificationReport {
+  maskRef: string;
+  ruleRevision: number;
+  totalPixels: number;
+  selectedMaskPixels: number;
+  changedInsideMask: number;
+  changedOutsideMask: number;
+  outsideDriftPercent: number;
+  verifiedAt: number;
 }
 
 export interface StoryboardShot {
@@ -34,18 +49,22 @@ export interface StoryboardShot {
   originalImageUrl: string;
   status: RuleStatus;
   discrepancyMessage?: string;
+  pixelVerification?: PixelVerificationReport;
   proposedFix?: {
     action: 'recolor' | 'replace';
     targetObject: string;
     targetColor: string;
     mask?: SamMask;
+    candidates?: SamMask[];
   };
   revisions: Array<{
     revisionId: string;
     timestamp: number;
     imageUrl: string;
     actionApplied: string;
-    pixelVerification?: import('../services/maskIntegrity').MaskVerificationReport;
+    ruleRevision?: number;
+    maskRef?: string;
+    pixelVerification?: PixelVerificationReport;
   }>;
 }
 
@@ -74,6 +93,7 @@ export interface ModelInvocationRecord {
   operation: string;
   timestamp: number;
   summary: string;
+  provenance?: 'offline-fixture' | 'live-meta-api';
 }
 
 export interface DirectorPresetScenario {

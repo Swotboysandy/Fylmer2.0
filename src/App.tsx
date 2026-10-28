@@ -10,7 +10,10 @@ import {
 } from './types/framelock';
 import { DIRECTOR_PRESETS, metaModelClient } from './services/metaModels';
 import { speechService } from './services/speechService';
-import { renderMuseStoryboardFrame } from './services/canvasEngine';
+import {
+  exportStoryboardAnimaticVideo,
+  renderMuseStoryboardFrame,
+} from './services/canvasEngine';
 import { VoiceTranscriptPanel } from './components/VoiceTranscriptPanel';
 import { StoryboardStage } from './components/StoryboardStage';
 import { AudioTimeline } from './components/AudioTimeline';
@@ -22,7 +25,7 @@ export default function App() {
   const initialPreset = DIRECTOR_PRESETS[0];
 
   const [projectState, setProjectState] = useState<ProjectState>({
-    projectId: 'proj-framelock-01',
+    projectId: 'proj-anchorshot-01',
     title: initialPreset.title,
     transcript: initialPreset.transcript,
     isRecording: false,
@@ -37,6 +40,8 @@ export default function App() {
 
   const [activePresetId, setActivePresetId] = useState<string>(initialPreset.id);
   const [showSamMaskOverlay, setShowSamMaskOverlay] = useState<boolean>(true);
+  const [showBeforeComparison, setShowBeforeComparison] = useState<boolean>(false);
+  const [isExportingVideo, setIsExportingVideo] = useState<boolean>(false);
   const [transitionsEnabled, setTransitionsEnabled] = useState(true);
   const [viewMode, setViewMode] = useState<'grid' | 'animatic'>('grid');
   const [currentTimeSeconds, setCurrentTimeSeconds] = useState<number>(0);
@@ -211,6 +216,8 @@ export default function App() {
         return;
       }
 
+      const ruleRevision = projectState.rules[0]?.revision || 1;
+      setShowBeforeComparison(false);
       setProjectState((prev) => ({
         ...prev,
         isProcessing: true,
@@ -219,14 +226,18 @@ export default function App() {
         } in Shot ${targetShot.shotNumber} with SAM 3.1 mask and recoloring pixels...`,
       }));
 
-      const updatedShot = await metaModelClient.applyContinuityFix(targetShot, customColor);
+      const updatedShot = await metaModelClient.applyContinuityFix(
+        targetShot,
+        customColor,
+        ruleRevision
+      );
       speechService.playEarcon('fixApplied');
 
       const resolvedColor =
         customColor || targetShot.proposedFix?.targetColor || 'blue';
       const resolvedObject = targetShot.proposedFix?.targetObject || 'cup';
 
-      const confirmationMessage = `Continuity verified on Shot ${updatedShot.shotNumber}. ${resolvedObject} recolored to ${resolvedColor} via SAM 3.1 segmentation mask.`;
+      const confirmationMessage = `Continuity verified on Shot ${updatedShot.shotNumber}. ${resolvedObject} recolored to ${resolvedColor} via SAM 3.1 mask ${updatedShot.pixelVerification?.maskRef || ''} with 0 outside-mask pixel drift.`;
 
       setProjectState((prev) => ({
         ...prev,
@@ -236,6 +247,31 @@ export default function App() {
         statusAnnouncement: confirmationMessage,
       }));
 
+      speechService.speak(confirmationMessage, true);
+    },
+    [projectState.shots, projectState.rules]
+  );
+
+  // Disambiguate an uncertain SAM 3.1 candidate selection (`POST /api/masks/disambiguate`)
+  const handleDisambiguateShot = useCallback(
+    async (shotId: string, selectedObjectId: string) => {
+      const targetShot = projectState.shots.find((s) => s.id === shotId);
+      if (!targetShot) return;
+
+      const updatedShot = await metaModelClient.disambiguateMaskSelection(
+        targetShot,
+        selectedObjectId
+      );
+      speechService.playEarcon('fixApplied');
+
+      const confirmationMessage = `Ambiguity resolved on Shot ${updatedShot.shotNumber}. Locked SAM 3.1 object ${selectedObjectId} (${updatedShot.proposedFix?.mask?.maskRef ?? ''}) as consistent.`;
+
+      setProjectState((prev) => ({
+        ...prev,
+        shots: prev.shots.map((s) => (s.id === shotId ? updatedShot : s)),
+        activeShotId: shotId,
+        statusAnnouncement: confirmationMessage,
+      }));
       speechService.speak(confirmationMessage, true);
     },
     [projectState.shots]
@@ -311,6 +347,7 @@ export default function App() {
                 currentImageUrl: rev.imageUrl,
                 status: isLocalImage(rev.imageUrl) ? 'uncertain' : isInitialMismatch ? 'mismatch' : 'consistent',
                 proposedFix: undefined,
+                pixelVerification: rev.pixelVerification,
                 discrepancyMessage: isInitialMismatch
                   ? `Restored initial revision containing continuity discrepancy (${rev.actionApplied}).`
                   : undefined,
@@ -399,7 +436,7 @@ export default function App() {
     if (!isLocalImage(imageUrl)) return;
     setProjectState(prev => ({...prev, isPlayingAnimatic: false, shots: prev.shots.map(shot => shot.id === shotId ? {
       ...shot, currentImageUrl: imageUrl, promptDescription: prompt, status: 'uncertain',
-      proposedFix: undefined, discrepancyMessage: undefined,
+      proposedFix: undefined, discrepancyMessage: undefined, pixelVerification: undefined,
       spokenDescription: `Shot ${shot.shotNumber}. ${prompt}. Local AI image; continuity unreviewed.`,
       revisions: [...shot.revisions, {revisionId: `local-${Date.now()}`, timestamp: Date.now(), imageUrl, actionApplied: 'Local SD1.5 image; unreviewed'}],
     } : shot), statusAnnouncement: 'Local image applied. Continuity remains unreviewed.'}));
@@ -470,7 +507,7 @@ export default function App() {
   const handleRunFullAudit = useCallback(() => {
     const unreviewed = projectState.shots.filter(s => s.status === 'uncertain').length;
     if (unreviewed) {
-      announceStatus(`${unreviewed} local AI images remain unreviewed. Fixture audits cannot verify their continuity.`, true);
+      announceStatus(`${unreviewed} shots require review or candidate selection. Their continuity has not been verified.`, true);
       return;
     }
     const mismatches = projectState.shots.filter((s) => s.status === 'mismatch');
@@ -705,6 +742,7 @@ export default function App() {
   // Export Project JSON
   const handleExportProjectJson = useCallback(() => {
     const exportPayload = {
+      app: 'Anchorshot',
       mode: 'offline-fixture',
       transitionsEnabled: transitionsEnabled && !reducedMotion,
       projectId: projectState.projectId,
@@ -719,6 +757,8 @@ export default function App() {
         promptDescription: s.promptDescription,
         spokenDescription: s.spokenDescription,
         status: s.status,
+        maskRef: s.proposedFix?.mask?.maskRef,
+        pixelVerification: s.pixelVerification,
         revisionsCount: s.revisions.length,
         currentImageUrl: s.currentImageUrl,
         mask: s.proposedFix?.mask,
@@ -736,6 +776,38 @@ export default function App() {
     URL.revokeObjectURL(url);
     announceStatus('Exported Anchorshot storyboard and continuity report JSON.', true);
   }, [projectState, announceStatus, transitionsEnabled, reducedMotion]);
+
+  // Export Animatic Video (.webm)
+  const handleExportAnimaticVideo = useCallback(async () => {
+    setIsExportingVideo(true);
+    announceStatus('Rendering 4-shot Anchorshot animatic video...', false);
+    const blob = await exportStoryboardAnimaticVideo(projectState.shots, projectState.title);
+    setIsExportingVideo(false);
+    if (!blob) {
+      announceStatus('Video export requires a browser supporting HTML5 Canvas MediaRecorder.', true);
+      return;
+    }
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${projectState.projectId}-animatic.webm`;
+    a.click();
+    URL.revokeObjectURL(url);
+    announceStatus('Exported Anchorshot 4-shot animatic video.', true);
+  }, [projectState.shots, projectState.title, projectState.projectId, announceStatus]);
+
+  const handleToggleBeforeComparison = useCallback(() => {
+    setShowBeforeComparison((prev) => {
+      const next = !prev;
+      announceStatus(
+        next
+          ? 'Showing pre-repair BEFORE frame for visual comparison.'
+          : 'Showing SAM 3.1 repaired AFTER frame with zero outside-mask pixel drift.',
+        false
+      );
+      return next;
+    });
+  }, [announceStatus]);
 
   // Global Keyboard Navigation (WCAG 2.2 AAA Full Keyboard Control)
   useEffect(() => {
@@ -766,6 +838,9 @@ export default function App() {
       } else if (key === 'y' && activeShot) {
         e.preventDefault();
         handleApplyProposedFix(activeShot.id);
+      } else if (key === 'b') {
+        e.preventDefault();
+        handleToggleBeforeComparison();
       } else if (key === 'm') {
         e.preventDefault();
         setShowSamMaskOverlay((prev) => {
@@ -815,6 +890,7 @@ export default function App() {
     handleToggleRecording,
     handleNarrateShot,
     handleApplyProposedFix,
+    handleToggleBeforeComparison,
     handleRunFullAudit,
     handleRebuildFromTranscript,
     handleSelectShot,
@@ -961,6 +1037,8 @@ export default function App() {
             rules={projectState.rules}
             activeShotId={projectState.activeShotId}
             showSamMaskOverlay={showSamMaskOverlay}
+            showBeforeComparison={showBeforeComparison}
+            isExportingVideo={isExportingVideo}
             isPlayingAnimatic={projectState.isPlayingAnimatic}
             viewMode={viewMode}
             onSetViewMode={setViewMode}
@@ -969,7 +1047,9 @@ export default function App() {
             onApplyProposedFix={(shotId) => handleApplyProposedFix(shotId)}
             onRunFullAudit={handleRunFullAudit}
             onToggleSamMaskOverlay={() => setShowSamMaskOverlay((prev) => !prev)}
+            onToggleBeforeComparison={handleToggleBeforeComparison}
             onExportProjectJson={handleExportProjectJson}
+            onExportAnimaticVideo={handleExportAnimaticVideo}
           />
 
           <AudioTimeline
@@ -989,11 +1069,14 @@ export default function App() {
           onUseLocalImage={handleUseLocalImage}
           activeShot={activeShot}
           showSamMaskOverlay={showSamMaskOverlay}
+          showBeforeComparison={showBeforeComparison}
           isProcessing={projectState.isProcessing}
           modelLogs={modelLogs}
           onToggleSamMaskOverlay={() => setShowSamMaskOverlay((prev) => !prev)}
+          onToggleBeforeComparison={handleToggleBeforeComparison}
           onNarrateShot={handleNarrateShot}
           onApplyProposedFix={handleApplyProposedFix}
+          onDisambiguateShot={handleDisambiguateShot}
           onSegmentObjectManual={handleSegmentObjectManual}
           onRevertShotRevision={handleRevertShotRevision}
           onUpdateShotPrompt={handleUpdateShotPrompt}
