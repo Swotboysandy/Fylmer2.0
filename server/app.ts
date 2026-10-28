@@ -88,8 +88,20 @@ export function createApp(options: Options) {
     try {
       const input = await checkInput(req.body);
       if (controller.signal.aborted) return;
+      const rawRuleRevision = req.body?.ruleRevision;
+      const revision =
+        typeof rawRuleRevision === 'number' &&
+        Number.isFinite(rawRuleRevision) &&
+        rawRuleRevision >= 1
+          ? Math.floor(rawRuleRevision)
+          : 1;
       requestsUsed++;
-      const result = await (options.segment ?? requestSam)(input, settings.key, controller.signal);
+      const result = await (options.segment ?? requestSam)(
+        input,
+        settings.key,
+        controller.signal,
+        revision,
+      );
       if (!controller.signal.aborted) res.json(result);
     } catch (error) {
       if (!controller.signal.aborted) next(error);
@@ -165,6 +177,7 @@ export function createApp(options: Options) {
         expectedValue: sanitizeString(req.body?.expectedValue),
         observedValue: sanitizeString(req.body?.observedValue),
         minConfidence: sanitizeFiniteNumber(req.body?.minConfidence),
+        ambiguityMargin: sanitizeFiniteNumber(req.body?.ambiguityMargin),
         revision,
       });
 
@@ -220,7 +233,9 @@ export function createApp(options: Options) {
     const rawShot =
       typeof req.query.shotNumber === 'string' ? Number(req.query.shotNumber) : undefined;
     const shotNumber =
-      rawShot !== undefined && Number.isFinite(rawShot) ? Math.floor(rawShot) : undefined;
+      rawShot !== undefined && Number.isFinite(rawShot) && rawShot >= 1
+        ? Math.floor(rawShot)
+        : undefined;
     res.json({
       tracks: trackStore.listTracks(concept, shotNumber),
     });
@@ -256,13 +271,35 @@ export function createApp(options: Options) {
       typeof shotNumber === 'number' && Number.isFinite(shotNumber) && shotNumber >= 1
         ? Math.floor(shotNumber)
         : undefined;
+    const validBounds =
+      bounds &&
+      typeof bounds === 'object' &&
+      typeof bounds.left === 'number' &&
+      Number.isFinite(bounds.left) &&
+      typeof bounds.top === 'number' &&
+      Number.isFinite(bounds.top) &&
+      typeof bounds.right === 'number' &&
+      Number.isFinite(bounds.right) &&
+      typeof bounds.bottom === 'number' &&
+      Number.isFinite(bounds.bottom) &&
+      bounds.left >= 0 &&
+      bounds.top >= 0 &&
+      bounds.right > bounds.left &&
+      bounds.bottom > bounds.top
+        ? {
+            left: bounds.left,
+            top: bounds.top,
+            right: bounds.right,
+            bottom: bounds.bottom,
+          }
+        : undefined;
     const updated = trackStore.disambiguate(
       maskRef.trim(),
       String(selectedObjectId).trim(),
       resolvedStatus,
       {
         shotNumber: validShotNumber,
-        bounds,
+        bounds: validBounds,
         confidence,
       },
     );
@@ -330,13 +367,14 @@ export function createApp(options: Options) {
       'cobalt',
       'red',
       'crimson',
-      'purple',
       'white',
+      'purple',
       'cyan',
     ];
     let expectedValue = 'blue';
+    const ruleSentence = transcript.split('.')[0]?.toLowerCase() || lower;
     for (const col of knownColors) {
-      if (lower.includes(col)) {
+      if (ruleSentence.includes(col)) {
         expectedValue =
           col === 'cobalt'
             ? 'blue'

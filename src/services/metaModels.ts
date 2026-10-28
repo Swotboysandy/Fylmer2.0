@@ -445,21 +445,14 @@ export class MetaModelClient {
       .toLowerCase()
       .trim()
       .replace(/\s+/g, '-');
-    const maskRef = selectedCandidate
+    let resolvedMaskRef = selectedCandidate
       ? selectedCandidate.maskRef
       : `sam-3.1:${normalizedConcept}:${selectedObjectId}:v${revision}`;
-    const mask = currentMask
-      ? {
-          ...currentMask,
-          objectId: selectedObjectId,
-          maskRef,
-        }
-      : undefined;
     const nextStatus = shot.status === 'uncertain' ? 'consistent' : shot.status;
 
     if (typeof fetch === 'function' && this.sessionToken && currentMask?.maskRef) {
       try {
-        await fetch('/api/masks/disambiguate', {
+        const res = await fetch('/api/masks/disambiguate', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -470,18 +463,38 @@ export class MetaModelClient {
             selectedObjectId,
             status: nextStatus,
             shotNumber: shot.shotNumber,
-            confidence: mask?.confidence,
+            confidence: currentMask.confidence,
           }),
         });
+        if (!res.ok) {
+          this.recordCall(
+            'sam-3.1',
+            `disambiguateMaskSelection("${selectedObjectId}", Shot ${shot.shotNumber})`,
+            `Server rejected disambiguation lock (${res.status}); shot remains ${shot.status}`
+          );
+          return shot;
+        }
+        const data = await res.json();
+        if (typeof data?.track?.maskRef === 'string') {
+          resolvedMaskRef = data.track.maskRef;
+        }
       } catch {
         // Non-blocking when running purely offline without Express backend
       }
     }
 
+    const mask = currentMask
+      ? {
+          ...currentMask,
+          objectId: selectedObjectId,
+          maskRef: resolvedMaskRef,
+        }
+      : undefined;
+
     this.recordCall(
       'sam-3.1',
       `disambiguateMaskSelection("${selectedObjectId}", Shot ${shot.shotNumber})`,
-      `Disambiguated Shot ${shot.shotNumber}: objectId=${selectedObjectId}, maskRef=${mask?.maskRef ?? maskRef}, status ${shot.status} → ${nextStatus}`
+      `Disambiguated Shot ${shot.shotNumber}: objectId=${selectedObjectId}, maskRef=${mask?.maskRef ?? resolvedMaskRef}, status ${shot.status} → ${nextStatus}`
     );
 
     return {

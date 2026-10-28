@@ -339,5 +339,20 @@ describe('Role 2: SAM 3.1 maskRef, neutral object selection, track storage & amb
       .set('X-Anchorshot-Session', limitedHealth.body.sessionToken)
       .send(body);
     expect(rateLimitedRes.status).toBe(429);
+
+    // Cross-shot disambiguation returns 404 when shotNumber mismatches, and re-keys maskRef when shotNumber matches
+    const wrongShot = await request(app)
+      .post('/api/masks/disambiguate')
+      .set('X-Anchorshot-Session', health.body.sessionToken)
+      .send({ maskRef: 'sam-3.1:cup:0:v2', selectedObjectId: '1', shotNumber: 9 });
+    expect(wrongShot.status).toBe(404);
+
+    const rightShot = await request(app)
+      .post('/api/masks/disambiguate')
+      .set('X-Anchorshot-Session', health.body.sessionToken)
+      .send({ maskRef: 'sam-3.1:cup:0:v2', selectedObjectId: '1', shotNumber: 2 });
+    expect(rightShot.status).toBe(200);
+    expect(rightShot.body.track.maskRef).toBe('sam-3.1:cup:1:v2');
+    expect(rightShot.body.track.objectId).toBe('1');
   });
 });

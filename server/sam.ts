@@ -43,7 +43,7 @@ export async function checkInput(body: unknown): Promise<CheckedInput> {
     typeof concept !== 'string' ||
     !concept.trim() ||
     concept.length > 100 ||
-    /[\r\n<>|]/.test(concept)
+    /[\r\n<>|:]/.test(concept)
   ) {
     throw new UserError('Use one short object name, such as cup.');
   }
@@ -101,7 +101,7 @@ export async function decodeSelection(
   const records = recordsOfKind(result.records, 'mask');
   if (records.length > 16)
     throw new UserError('Too many matching objects. Use a more specific object name.', 422);
-  const normalizedConcept = input.concept.toLowerCase().replace(/\s+/g, '-');
+  const normalizedConcept = input.concept.toLowerCase().trim().replace(/\s+/g, '-');
   const objects = records.map((record) => {
     const { bounds, mask } = record;
     if (
@@ -137,7 +137,7 @@ export async function decodeSelection(
       ...(record.confidence === undefined ? {} : { confidence: record.confidence }),
     };
   });
-  const check = evaluateSamContinuityCheck(objects, input.concept);
+  const check = evaluateSamContinuityCheck(objects, input.concept, { revision });
   return {
     requestId,
     sourceHash: input.sourceHash,
@@ -174,12 +174,16 @@ export function evaluateSamContinuityCheck(
     typeof options?.ambiguityMargin === 'number' && Number.isFinite(options.ambiguityMargin)
       ? Math.max(0, Math.min(1, options.ambiguityMargin))
       : 0.08;
-  const revision =
-    typeof options?.revision === 'number' && Number.isFinite(options.revision) && options.revision >= 1
-      ? Math.floor(options.revision)
-      : 1;
+  const hasRevision =
+    typeof options?.revision === 'number' &&
+    Number.isFinite(options.revision) &&
+    options.revision >= 1;
+  const revision = hasRevision ? Math.floor(options.revision!) : 1;
+  // Default unconfident masks to 0.95 so multi-mask responses without reported confidence tie and trigger Check 2 ('uncertain')
   const clampConfidence = (c: number | undefined) =>
     typeof c === 'number' && Number.isFinite(c) ? Math.max(0, Math.min(1, c)) : 0.95;
+  const hasReportedConfidence = (o?: ObjectMask) =>
+    typeof o?.confidence === 'number' && Number.isFinite(o.confidence);
 
   if (objects.length === 0) {
     return {
@@ -207,9 +211,15 @@ export function evaluateSamContinuityCheck(
 
   const primary = ranked[0];
   const primaryConf = clampConfidence(primary.confidence);
+  const iouLabel = hasReportedConfidence(primary)
+    ? `${(primaryConf * 100).toFixed(1)}% IoU`
+    : 'IoU not reported';
   const normalizedConcept = concept.toLowerCase().trim().replace(/\s+/g, '-');
-  const primaryMaskRef =
-    primary.maskRef ?? `sam-3.1:${normalizedConcept}:${primary.objectId}:v${revision}`;
+  const primaryMaskRef = !primary.maskRef
+    ? `sam-3.1:${normalizedConcept}:${primary.objectId}:v${revision}`
+    : hasRevision
+      ? primary.maskRef.replace(/:v\d+$/, `:v${revision}`)
+      : primary.maskRef;
 
   // Check 1: Low IoU confidence (e.g., partial occlusion)
   if (primaryConf < minConfidence) {
@@ -262,11 +272,7 @@ export function evaluateSamContinuityCheck(
       confidence: primaryConf,
       expectedValue: options.expectedValue,
       observedValue: options.observedValue,
-      explanation: `SAM 3.1 isolated "${concept}" (${primaryMaskRef}, ${(
-        primaryConf * 100
-      ).toFixed(1)}% IoU): observed "${options.observedValue}" conflicts with expected rule "${
-        options.expectedValue
-      }".`,
+      explanation: `SAM 3.1 isolated "${concept}" (${primaryMaskRef}, ${iouLabel}): observed "${options.observedValue}" conflicts with expected rule "${options.expectedValue}".`,
       isAmbiguous: false,
     };
   }
@@ -279,9 +285,7 @@ export function evaluateSamContinuityCheck(
     confidence: primaryConf,
     expectedValue: options?.expectedValue,
     observedValue: options?.observedValue,
-    explanation: `SAM 3.1 verified "${concept}" via ${primaryMaskRef} (${(
-      primaryConf * 100
-    ).toFixed(1)}% IoU).`,
+    explanation: `SAM 3.1 verified "${concept}" via ${primaryMaskRef} (${iouLabel}).`,
     isAmbiguous: false,
   };
 }
@@ -329,8 +333,9 @@ export class MaskTrackStore {
 
   public listTracks(concept?: string, shotNumber?: number): StoredMaskTrack[] {
     const all = Array.from(this.tracks.values());
+    const normalizedConcept = concept?.toLowerCase().trim();
     return all.filter((t) => {
-      if (concept && t.concept.toLowerCase() !== concept.toLowerCase()) return false;
+      if (normalizedConcept && t.concept.toLowerCase().trim() !== normalizedConcept) return false;
       if (shotNumber !== undefined && t.shotNumber !== shotNumber) return false;
       return true;
     });
@@ -353,11 +358,10 @@ export class MaskTrackStore {
     let existing: StoredMaskTrack | undefined;
 
     if (options?.shotNumber !== undefined) {
-      const candidateKey = MaskTrackStore.trackKey(maskRef, options.shotNumber);
-      existing = this.tracks.get(candidateKey);
-      if (existing) targetKey = candidateKey;
-    }
-    if (!existing) {
+      targetKey = MaskTrackStore.trackKey(maskRef, options.shotNumber);
+      existing = this.tracks.get(targetKey);
+      if (!existing) return null;
+    } else {
       for (const [key, track] of this.tracks.entries()) {
         if (track.maskRef === maskRef) {
           targetKey = key;
@@ -368,8 +372,10 @@ export class MaskTrackStore {
     }
     if (!existing || !targetKey) return null;
 
+    const newMaskRef = maskRef.replace(/:[^:]+:v(\d+)$/, `:${trimmedObjectId}:v$1`);
     const updated: StoredMaskTrack = {
       ...existing,
+      maskRef: newMaskRef,
       objectId: trimmedObjectId,
       bounds: options?.bounds ?? existing.bounds,
       confidence:
@@ -377,9 +383,10 @@ export class MaskTrackStore {
           ? Math.max(0, Math.min(1, options.confidence))
           : existing.confidence,
       status: resolvedStatus,
-      evidence: `Director disambiguated object "${trimmedObjectId}" for ${maskRef}; status locked as ${resolvedStatus}.`,
+      evidence: `Director disambiguated object "${trimmedObjectId}" for ${newMaskRef}; status locked as ${resolvedStatus}.`,
     };
-    this.tracks.set(targetKey, updated);
+    this.tracks.delete(targetKey);
+    this.tracks.set(MaskTrackStore.trackKey(newMaskRef, existing.shotNumber), updated);
     return updated;
   }
 
@@ -401,7 +408,7 @@ export class MaskTrackStore {
       const conceptMatches =
         !normalizedConcept || track.concept.toLowerCase().trim() === normalizedConcept;
       const revChanged = Boolean(
-        conceptMatches && newRuleRevision !== undefined && track.revision < newRuleRevision,
+        conceptMatches && newRuleRevision !== undefined && track.revision <= newRuleRevision,
       );
       if (hashChanged || revChanged) {
         this.tracks.delete(key);
