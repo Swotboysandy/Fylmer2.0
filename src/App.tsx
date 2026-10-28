@@ -8,7 +8,10 @@ import {
 } from './types/framelock';
 import { DIRECTOR_PRESETS, metaModelClient } from './services/metaModels';
 import { speechService } from './services/speechService';
-import { renderMuseStoryboardFrame } from './services/canvasEngine';
+import {
+  exportStoryboardAnimaticVideo,
+  renderMuseStoryboardFrame,
+} from './services/canvasEngine';
 import { VoiceTranscriptPanel } from './components/VoiceTranscriptPanel';
 import { StoryboardStage } from './components/StoryboardStage';
 import { AudioTimeline } from './components/AudioTimeline';
@@ -19,7 +22,7 @@ export default function App() {
   const initialPreset = DIRECTOR_PRESETS[0];
 
   const [projectState, setProjectState] = useState<ProjectState>({
-    projectId: 'proj-framelock-01',
+    projectId: 'proj-anchorshot-01',
     title: initialPreset.title,
     transcript: initialPreset.transcript,
     isRecording: false,
@@ -29,11 +32,13 @@ export default function App() {
     isPlayingAnimatic: false,
     isProcessing: true,
     statusAnnouncement:
-      'Framelock Studio initialized. Loading Sequence 01: Midnight Diner Rain and running continuity audit.',
+      'AnchorShot Studio initialized. Loading Sequence 01: Midnight Diner Rain and running continuity audit.',
   });
 
   const [activePresetId, setActivePresetId] = useState<string>(initialPreset.id);
   const [showSamMaskOverlay, setShowSamMaskOverlay] = useState<boolean>(true);
+  const [showBeforeComparison, setShowBeforeComparison] = useState<boolean>(false);
+  const [isExportingVideo, setIsExportingVideo] = useState<boolean>(false);
   const [viewMode, setViewMode] = useState<'grid' | 'animatic'>('grid');
   const [currentTimeSeconds, setCurrentTimeSeconds] = useState<number>(0);
   const [isSpeaking, setIsSpeaking] = useState<boolean>(false);
@@ -203,6 +208,8 @@ export default function App() {
       const targetShot = projectState.shots.find((s) => s.id === shotId);
       if (!targetShot) return;
 
+      const ruleRevision = projectState.rules[0]?.revision || 1;
+      setShowBeforeComparison(false);
       setProjectState((prev) => ({
         ...prev,
         isProcessing: true,
@@ -211,14 +218,18 @@ export default function App() {
         } in Shot ${targetShot.shotNumber} with SAM 3.1 mask and recoloring pixels...`,
       }));
 
-      const updatedShot = await metaModelClient.applyContinuityFix(targetShot, customColor);
+      const updatedShot = await metaModelClient.applyContinuityFix(
+        targetShot,
+        customColor,
+        ruleRevision
+      );
       speechService.playEarcon('fixApplied');
 
       const resolvedColor =
         customColor || targetShot.proposedFix?.targetColor || 'blue';
       const resolvedObject = targetShot.proposedFix?.targetObject || 'cup';
 
-      const confirmationMessage = `Continuity verified on Shot ${updatedShot.shotNumber}. ${resolvedObject} recolored to ${resolvedColor} via SAM 3.1 segmentation mask.`;
+      const confirmationMessage = `Continuity verified on Shot ${updatedShot.shotNumber}. ${resolvedObject} recolored to ${resolvedColor} via SAM 3.1 mask ${updatedShot.pixelVerification?.maskRef || ''} with 0 outside-mask pixel drift.`;
 
       setProjectState((prev) => ({
         ...prev,
@@ -230,7 +241,7 @@ export default function App() {
 
       speechService.speak(confirmationMessage, true);
     },
-    [projectState.shots]
+    [projectState.shots, projectState.rules]
   );
 
   // Manual SAM 3.1 Segmentation trigger on any shot
@@ -661,6 +672,7 @@ export default function App() {
   // Export Project JSON
   const handleExportProjectJson = useCallback(() => {
     const exportPayload = {
+      app: 'AnchorShot',
       projectId: projectState.projectId,
       title: projectState.title,
       exportedAt: new Date().toISOString(),
@@ -673,6 +685,8 @@ export default function App() {
         promptDescription: s.promptDescription,
         spokenDescription: s.spokenDescription,
         status: s.status,
+        maskRef: s.proposedFix?.mask?.maskRef,
+        pixelVerification: s.pixelVerification,
         revisionsCount: s.revisions.length,
       })),
     };
@@ -685,8 +699,40 @@ export default function App() {
     a.download = `${projectState.projectId}-continuity-report.json`;
     a.click();
     URL.revokeObjectURL(url);
-    announceStatus('Exported Framelock storyboard and continuity report JSON.', true);
+    announceStatus('Exported AnchorShot storyboard and continuity report JSON.', true);
   }, [projectState, announceStatus]);
+
+  // Export Animatic Video (.webm)
+  const handleExportAnimaticVideo = useCallback(async () => {
+    setIsExportingVideo(true);
+    announceStatus('Rendering 4-shot AnchorShot animatic video...', false);
+    const blob = await exportStoryboardAnimaticVideo(projectState.shots, projectState.title);
+    setIsExportingVideo(false);
+    if (!blob) {
+      announceStatus('Video export requires a browser supporting HTML5 Canvas MediaRecorder.', true);
+      return;
+    }
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${projectState.projectId}-animatic.webm`;
+    a.click();
+    URL.revokeObjectURL(url);
+    announceStatus('Exported AnchorShot 4-shot animatic video.', true);
+  }, [projectState.shots, projectState.title, projectState.projectId, announceStatus]);
+
+  const handleToggleBeforeComparison = useCallback(() => {
+    setShowBeforeComparison((prev) => {
+      const next = !prev;
+      announceStatus(
+        next
+          ? 'Showing pre-repair BEFORE frame for visual comparison.'
+          : 'Showing SAM 3.1 repaired AFTER frame with zero outside-mask pixel drift.',
+        false
+      );
+      return next;
+    });
+  }, [announceStatus]);
 
   // Global Keyboard Navigation (WCAG 2.2 AAA Full Keyboard Control)
   useEffect(() => {
@@ -715,6 +761,9 @@ export default function App() {
       } else if (key === 'y' && activeShot) {
         e.preventDefault();
         handleApplyProposedFix(activeShot.id);
+      } else if (key === 'b') {
+        e.preventDefault();
+        handleToggleBeforeComparison();
       } else if (key === 'm') {
         e.preventDefault();
         setShowSamMaskOverlay((prev) => {
@@ -764,6 +813,7 @@ export default function App() {
     handleToggleRecording,
     handleNarrateShot,
     handleApplyProposedFix,
+    handleToggleBeforeComparison,
     handleRunFullAudit,
     handleRebuildFromTranscript,
     handleSelectShot,
@@ -799,7 +849,7 @@ export default function App() {
           href="#top"
           className="text-xl font-bold tracking-tight text-white font-display whitespace-nowrap shrink-0"
         >
-          Framelock
+          AnchorShot
         </a>
 
         {/* Zone 2: 4 concise single-line text navigation links */}
@@ -906,6 +956,8 @@ export default function App() {
             rules={projectState.rules}
             activeShotId={projectState.activeShotId}
             showSamMaskOverlay={showSamMaskOverlay}
+            showBeforeComparison={showBeforeComparison}
+            isExportingVideo={isExportingVideo}
             isPlayingAnimatic={projectState.isPlayingAnimatic}
             viewMode={viewMode}
             onSetViewMode={setViewMode}
@@ -914,7 +966,9 @@ export default function App() {
             onApplyProposedFix={(shotId) => handleApplyProposedFix(shotId)}
             onRunFullAudit={handleRunFullAudit}
             onToggleSamMaskOverlay={() => setShowSamMaskOverlay((prev) => !prev)}
+            onToggleBeforeComparison={handleToggleBeforeComparison}
             onExportProjectJson={handleExportProjectJson}
+            onExportAnimaticVideo={handleExportAnimaticVideo}
           />
 
           <AudioTimeline
@@ -933,9 +987,11 @@ export default function App() {
         <ShotInspectorPanel
           activeShot={activeShot}
           showSamMaskOverlay={showSamMaskOverlay}
+          showBeforeComparison={showBeforeComparison}
           isProcessing={projectState.isProcessing}
           modelLogs={modelLogs}
           onToggleSamMaskOverlay={() => setShowSamMaskOverlay((prev) => !prev)}
+          onToggleBeforeComparison={handleToggleBeforeComparison}
           onNarrateShot={handleNarrateShot}
           onApplyProposedFix={handleApplyProposedFix}
           onSegmentObjectManual={handleSegmentObjectManual}

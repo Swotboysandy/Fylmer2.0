@@ -1,2 +1,2 @@
-// Provisional identity. Change here when the team chooses the final name.
-export const brand = { name: 'Framelock', descriptor: 'Frame lab', provisional: true };
+// Finalized brand identity for the Meta Global AI Developer Hackathon.
+export const brand = { name: 'AnchorShot', descriptor: 'Voice-Directed Continuity Studio', provisional: false };

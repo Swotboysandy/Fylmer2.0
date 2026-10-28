@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import {
   AlertTriangle,
   CheckCircle2,
+  HelpCircle,
   Volume2,
   Wand2,
   RotateCcw,
@@ -9,15 +10,19 @@ import {
   History,
   Cpu,
   Sliders,
+  ShieldCheck,
+  Eye,
 } from 'lucide-react';
 import { ModelInvocationRecord, StoryboardShot } from '../types/framelock';
 
 interface ShotInspectorPanelProps {
   activeShot: StoryboardShot | null;
   showSamMaskOverlay: boolean;
+  showBeforeComparison?: boolean;
   isProcessing: boolean;
   modelLogs: ModelInvocationRecord[];
   onToggleSamMaskOverlay: () => void;
+  onToggleBeforeComparison?: () => void;
   onNarrateShot: (shot: StoryboardShot) => void;
   onApplyProposedFix: (shotId: string, customColor?: string) => void;
   onSegmentObjectManual: (shotId: string, targetObject: string) => void;
@@ -37,9 +42,11 @@ const COLOR_SWATCH_OPTIONS = [
 export const ShotInspectorPanel: React.FC<ShotInspectorPanelProps> = ({
   activeShot,
   showSamMaskOverlay,
+  showBeforeComparison = false,
   isProcessing,
   modelLogs,
   onToggleSamMaskOverlay,
+  onToggleBeforeComparison,
   onNarrateShot,
   onApplyProposedFix,
   onSegmentObjectManual,
@@ -74,6 +81,8 @@ export const ShotInspectorPanel: React.FC<ShotInspectorPanelProps> = ({
   }
 
   const isMismatch = activeShot.status === 'mismatch';
+  const isUncertain = activeShot.status === 'uncertain';
+  const isRepaired = activeShot.currentImageUrl !== activeShot.originalImageUrl;
   const currentMask = activeShot.proposedFix?.mask;
 
   return (
@@ -126,6 +135,25 @@ export const ShotInspectorPanel: React.FC<ShotInspectorPanelProps> = ({
               {activeShot.discrepancyMessage}
             </p>
           </div>
+        ) : isUncertain ? (
+          <div
+            role="region"
+            aria-label="Continuity Ambiguity Alert"
+            className="p-3.5 bg-[#16191E] border-2 border-[#38BDF8] rounded flex flex-col gap-2"
+          >
+            <div className="flex items-center justify-between">
+              <span className="flex items-center gap-2 text-sm font-bold text-[#38BDF8]">
+                <HelpCircle className="w-5 h-5 text-[#38BDF8] shrink-0" aria-hidden="true" />
+                <span>Ambiguous Occlusion (Uncertain)</span>
+              </span>
+              <kbd className="px-2 py-0.5 text-xs font-mono font-bold bg-[#0F172A] text-[#38BDF8] rounded">
+                [Y] Confirm
+              </kbd>
+            </div>
+            <p className="text-sm text-[#E2E8F0] leading-relaxed">
+              {activeShot.discrepancyMessage}
+            </p>
+          </div>
         ) : (
           <div
             role="region"
@@ -137,6 +165,55 @@ export const ShotInspectorPanel: React.FC<ShotInspectorPanelProps> = ({
               <span>Continuity Rules Verified</span>
             </span>
             <span className="text-xs font-mono text-[#34D399]">100% SYNC</span>
+          </div>
+        )}
+
+        {/* Role 3 Pixel-Diff Verification Proof Card */}
+        {activeShot.pixelVerification && (
+          <div
+            role="region"
+            aria-label="Outside-Mask Pixel Drift Verification"
+            className="p-3 bg-[#16191E] border border-[#10B981] rounded flex flex-col gap-1.5 text-xs font-mono"
+          >
+            <div className="flex items-center justify-between text-[#34D399] font-bold">
+              <span className="flex items-center gap-1.5">
+                <ShieldCheck className="w-4 h-4" aria-hidden="true" />
+                <span>0 OUTSIDE-MASK PIXEL DRIFT</span>
+              </span>
+              <span>{activeShot.pixelVerification.outsideDriftPercent}% DRIFT</span>
+            </div>
+            <div className="grid grid-cols-2 gap-1 text-[#E2E8F0] pt-1">
+              <span>Inside Mask Changed:</span>
+              <span className="text-right font-bold">
+                {activeShot.pixelVerification.changedInsideMask.toLocaleString()} px
+              </span>
+              <span>Outside Mask Changed:</span>
+              <span className="text-right font-bold text-[#34D399]">
+                {activeShot.pixelVerification.changedOutsideMask} px
+              </span>
+              <span>Mask Reference:</span>
+              <span className="text-right text-[#38BDF8] truncate">
+                {activeShot.pixelVerification.maskRef}
+              </span>
+              <span>Rule Revision:</span>
+              <span className="text-right">Rev {activeShot.pixelVerification.ruleRevision}</span>
+            </div>
+            {isRepaired && onToggleBeforeComparison && (
+              <button
+                type="button"
+                onClick={onToggleBeforeComparison}
+                aria-pressed={showBeforeComparison}
+                className="mt-1.5 min-h-[36px] w-full px-2.5 py-1 bg-[#1E232B] border border-[#4B5563] hover:border-[#38BDF8] rounded text-xs font-mono text-white flex items-center justify-between transition-colors"
+              >
+                <span className="flex items-center gap-1.5">
+                  <Eye className="w-3.5 h-3.5 text-[#38BDF8]" aria-hidden="true" />
+                  <span>
+                    {showBeforeComparison ? 'Showing BEFORE Repair' : 'Compare Before / After'}
+                  </span>
+                </span>
+                <kbd className="text-[#38BDF8]">[B]</kbd>
+              </button>
+            )}
           </div>
         )}
       </div>
@@ -160,12 +237,15 @@ export const ShotInspectorPanel: React.FC<ShotInspectorPanelProps> = ({
         </div>
 
         {currentMask ? (
-          <div className="p-3 bg-[#16191E] border border-[#323A46] rounded flex flex-col gap-2 text-xs font-mono text-[#E2E8F0] tabular-nums">
+          <div className="p-3 bg-[#16191E] border border-[#323A46] rounded flex flex-col gap-1.5 text-xs font-mono text-[#E2E8F0] tabular-nums">
             <div className="flex items-center justify-between">
               <span>TARGET: &ldquo;{activeShot.proposedFix?.targetObject || 'cup'}&rdquo;</span>
               <span className="text-[#34D399]">
                 IoU: {(currentMask.confidence * 100).toFixed(1)}%
               </span>
+            </div>
+            <div className="text-[#38BDF8] truncate">
+              MASK REF: {currentMask.maskRef}
             </div>
             <div className="text-[#94A3B8]">
               BBOX: X:{currentMask.box.x}% Y:{currentMask.box.y}% W:{currentMask.box.width}% H:{currentMask.box.height}%

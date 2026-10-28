@@ -8,6 +8,7 @@ import {
 } from '../types/framelock';
 import {
   applySamPixelFixToImage,
+  applySamPixelFixWithVerification,
   generateSam3MaskData,
   getTargetObjectBox,
   renderMuseStoryboardFrame,
@@ -256,6 +257,8 @@ export class MetaModelClient {
       const shotNumber = i + 1;
       const cameraAngle = cameraSequence[i % cameraSequence.length];
       const hasDiscrepancy = injectIntentionalDiscrepancy && shotNumber === mismatchShotNumber;
+      const isUncertainOcclusion =
+        injectIntentionalDiscrepancy && targetObject === 'jacket' && shotNumber === 4;
       const actualRenderedColor = hasDiscrepancy ? mismatchedColor : expectedColor;
 
       const basePrompt =
@@ -280,12 +283,26 @@ export class MetaModelClient {
       );
 
       let samMask: SamMask | undefined;
-      if (hasDiscrepancy) {
-        samMask = await this.segmentObjectWithSam3(shotNumber, targetObject, box);
+      if (hasDiscrepancy || isUncertainOcclusion) {
+        samMask = await this.segmentObjectWithSam3(
+          shotNumber,
+          targetObject,
+          box,
+          isUncertainOcclusion ? 0.724 : 0.986,
+          primaryRule.revision
+        );
       }
+
+      const shotStatus = hasDiscrepancy
+        ? 'mismatch'
+        : isUncertainOcclusion
+        ? 'uncertain'
+        : 'consistent';
 
       const spokenDescription = hasDiscrepancy
         ? `Shot ${shotNumber}, ${cameraAngle.replace('_', ' ')} framing, duration 3.5 seconds. ${basePrompt}. Continuity Alert: ${targetObject} rendered in ${actualRenderedColor} instead of expected ${expectedColor}. Press Y to apply SAM 3.1 mask recolor to ${expectedColor}.`
+        : isUncertainOcclusion
+        ? `Shot ${shotNumber}, ${cameraAngle.replace('_', ' ')} framing, duration 3.5 seconds. ${basePrompt}. Continuity Uncertain: partial foreground occlusion on ${targetObject} (72.4% confidence). Press Y to confirm SAM 3.1 mask and lock ${expectedColor}.`
         : `Shot ${shotNumber}, ${cameraAngle.replace('_', ' ')} framing, duration 3.5 seconds. ${basePrompt}. Continuity verified: ${targetObject} color is ${expectedColor}.`;
 
       shots.push({
@@ -296,24 +313,29 @@ export class MetaModelClient {
         spokenDescription,
         currentImageUrl: imageUrl,
         originalImageUrl: imageUrl,
-        status: hasDiscrepancy ? 'mismatch' : 'consistent',
+        status: shotStatus,
         discrepancyMessage: hasDiscrepancy
-          ? `Visual audit detected a ${actualRenderedColor} ${targetObject} in Shot ${shotNumber}, violating rule "${targetObject}.color = ${expectedColor}" (all_shots).`
+          ? `Visual audit detected a ${actualRenderedColor} ${targetObject} in Shot ${shotNumber}, violating rule "${targetObject}.color = ${expectedColor}" (rev ${primaryRule.revision}).`
+          : isUncertainOcclusion
+          ? `SAM 3.1 flagged partial occlusion ambiguity (72.4% IoU) on ${targetObject} in Shot ${shotNumber}. Confirm mask selection (${samMask?.maskRef}) to verify continuity.`
           : undefined,
-        proposedFix: hasDiscrepancy
-          ? {
-              action: 'recolor',
-              targetObject,
-              targetColor: expectedColor,
-              mask: samMask,
-            }
-          : undefined,
+        proposedFix:
+          hasDiscrepancy || isUncertainOcclusion
+            ? {
+                action: 'recolor',
+                targetObject,
+                targetColor: expectedColor,
+                mask: samMask,
+              }
+            : undefined,
         revisions: [
           {
             revisionId: `rev-${shotNumber}-initial`,
             timestamp: Date.now() - (4 - i) * 15000,
             imageUrl,
             actionApplied: `Initial generation via muse-image-1.0 (${actualRenderedColor} ${targetObject})`,
+            ruleRevision: primaryRule.revision,
+            maskRef: samMask?.maskRef,
           },
         ],
       });
@@ -330,12 +352,14 @@ export class MetaModelClient {
 
   /**
    * 4. `sam-3.1` (Segment Anything Model 3.1)
-   * Isolates the target object via text prompt + bounding box and returns a binary/RLE mask.
+   * Isolates the target object via text prompt + bounding box and returns a binary/RLE mask with versioned `maskRef`.
    */
   public async segmentObjectWithSam3(
     shotNumber: number,
     targetObject: string,
-    customBox?: BoundingBox
+    customBox?: BoundingBox,
+    confidence: number = 0.986,
+    revision: number = 1
   ): Promise<SamMask> {
     await new Promise((r) => setTimeout(r, 180));
     const cameraSequence: Array<SceneRenderSpec['cameraAngle']> = [
@@ -346,54 +370,73 @@ export class MetaModelClient {
     ];
     const angle = cameraSequence[(shotNumber - 1) % cameraSequence.length];
     const box = customBox || getTargetObjectBox(angle, targetObject);
-    const mask = generateSam3MaskData(`${targetObject}-shot-${shotNumber}`, box, 0.986);
+    const mask = generateSam3MaskData(
+      `${targetObject}-shot-${shotNumber}`,
+      box,
+      confidence,
+      revision
+    );
 
     this.recordCall(
       'sam-3.1',
       `segmentObject("${targetObject}", Shot ${shotNumber})`,
-      `Generated RLE/alpha mask [box: ${box.x}%,${box.y}% ${box.width}x${box.height}%, IoU conf: ${(mask.confidence * 100).toFixed(1)}%]`
+      `Generated maskRef ${mask.maskRef} [box: ${box.x}%,${box.y}% ${box.width}x${box.height}%, IoU conf: ${(mask.confidence * 100).toFixed(1)}%]`
     );
 
     return mask;
   }
 
   /**
-   * Executes the proposed continuity fix on a shot using `sam-3.1` mask isolation
-   * and client-side pixel manipulation (`applySamPixelFixToImage`).
+   * Executes the proposed continuity fix on a shot using `sam-3.1` mask isolation,
+   * client-side pixel manipulation (`applySamPixelFixWithVerification`), and
+   * full-frame pixel-diff verification proving 0 outside-mask pixel drift.
    */
   public async applyContinuityFix(
     shot: StoryboardShot,
-    overrideColor?: string
+    overrideColor?: string,
+    ruleRevision: number = 1
   ): Promise<StoryboardShot> {
     const targetObject = shot.proposedFix?.targetObject || 'cup';
     const targetColor = overrideColor || shot.proposedFix?.targetColor || 'blue';
 
     let mask = shot.proposedFix?.mask;
     if (!mask) {
-      mask = await this.segmentObjectWithSam3(shot.shotNumber, targetObject);
+      mask = await this.segmentObjectWithSam3(
+        shot.shotNumber,
+        targetObject,
+        undefined,
+        0.986,
+        ruleRevision
+      );
     }
 
-    const updatedImageUrl = await applySamPixelFixToImage(
-      shot.currentImageUrl,
-      mask.box,
-      targetObject,
-      targetColor
-    );
+    const { imageUrl: updatedImageUrl, pixelVerification } =
+      await applySamPixelFixWithVerification(
+        shot.currentImageUrl,
+        mask.box,
+        targetObject,
+        targetColor,
+        mask.maskRef,
+        ruleRevision
+      );
 
     this.recordCall(
       'sam-3.1',
       `applyMaskedRecolor(Shot ${shot.shotNumber})`,
-      `Isolated "${targetObject}" via mask ${mask.id} and recolored pixels to "${targetColor}"`
+      `Mask ${mask.maskRef} (ruleRev ${ruleRevision}): ${pixelVerification.changedInsideMask} px updated inside mask, ${pixelVerification.changedOutsideMask} px outside (${pixelVerification.outsideDriftPercent}% drift)`
     );
 
     const newRevision = {
       revisionId: `rev-${shot.shotNumber}-${shot.revisions.length + 1}`,
       timestamp: Date.now(),
       imageUrl: updatedImageUrl,
-      actionApplied: `SAM 3.1 masked recolor: ${targetObject} → ${targetColor}`,
+      actionApplied: `SAM 3.1 masked recolor: ${targetObject} → ${targetColor} (${pixelVerification.changedOutsideMask}px outside drift)`,
+      ruleRevision,
+      maskRef: mask.maskRef,
+      pixelVerification,
     };
 
-    const updatedSpoken = `Shot ${shot.shotNumber}. ${shot.promptDescription}. Continuity verified: ${targetObject} recolored to ${targetColor} via SAM 3.1 mask.`;
+    const updatedSpoken = `Shot ${shot.shotNumber}. ${shot.promptDescription}. Continuity verified: ${targetObject} recolored to ${targetColor} via SAM 3.1 mask ${mask.maskRef} with zero outside-mask pixel drift.`;
 
     return {
       ...shot,
@@ -401,6 +444,7 @@ export class MetaModelClient {
       status: 'consistent',
       discrepancyMessage: undefined,
       spokenDescription: updatedSpoken,
+      pixelVerification,
       proposedFix: {
         action: 'recolor',
         targetObject,

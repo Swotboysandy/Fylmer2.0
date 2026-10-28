@@ -1,6 +1,6 @@
-# Framelock — Accessible Voice-Directed Storyboard Studio
+# AnchorShot — Accessible Voice-Directed Storyboard Studio
 
-**Framelock** is a WCAG 2.2 AAA accessible, voice-directed storyboard and continuity studio designed for blind, low-vision, and multimodal filmmakers for the Meta Global AI Developer Hackathon.
+**AnchorShot** is a WCAG 2.2 AAA accessible, voice-directed storyboard and continuity studio designed for blind, low-vision, and multimodal filmmakers for the Meta Global AI Developer Hackathon.
 
 It combines natural voice direction, real-time spoken screen narration (`window.speechSynthesis`), spatial Web Audio API earcons, and an HTML5 Canvas + SAM 3.1 segmentation engine to detect and fix visual continuity discrepancies across storyboard sequences without requiring visual reliance.
 
@@ -8,9 +8,9 @@ It combines natural voice direction, real-time spoken screen narration (`window.
 
 ## 1. Architecture & Meta AI Model Stack
 
-Framelock orchestrates four Meta AI model capabilities alongside browser speech and canvas engines:
+AnchorShot orchestrates four Meta AI model capabilities alongside browser speech and canvas engines:
 
-| Model Identifier | Environment Variable | Role in Framelock Pipeline |
+| Model Identifier | Environment Variable | Role in AnchorShot Pipeline |
 | :--- | :--- | :--- |
 | **`muse-voice-transcribe-1.0`** | `VITE_MUSE_VOICE_MODEL` | Converts live microphone audio streams (`MediaRecorder`) and voice commands into structured scene transcripts. |
 | **`muse-spark-1.3`** | `VITE_MUSE_SPARK_MODEL` | Extracts structured `ContinuityRule` JSON objects, plans shot lists from transcripts, and runs multimodal visual continuity audits. |
@@ -42,7 +42,7 @@ VITE_MUSE_IMAGE_MODEL="muse-image-1.0"
 VITE_SAM3_MODEL="sam-3.1"
 ```
 
-> **Offline / Zero-Key Evaluation Mode:** If `VITE_META_AI_API_KEY` is left unset or set to `"mock"`, Framelock automatically runs using its built-in deterministic HTML5 Canvas generator, SAM 3.1 mask synthesizer, and client-side pixel manipulation engine so all workflows can be tested live out-of-the-box.
+> **Offline / Zero-Key Evaluation Mode:** If `VITE_META_AI_API_KEY` is left unset or set to `"mock"`, AnchorShot automatically runs using its built-in deterministic HTML5 Canvas generator, SAM 3.1 mask synthesizer, and client-side pixel manipulation engine so all workflows can be tested live out-of-the-box.
 
 ---
 
@@ -76,7 +76,7 @@ VITE_SAM3_MODEL="sam-3.1"
 
 ## 4. Accessible Keyboard Shortcuts & Voice Workflow
 
-Framelock is engineered for complete keyboard-only and screen-reader operation:
+AnchorShot is engineered for complete keyboard-only and screen-reader operation:
 
 | Shortcut | Action |
 | :--- | :--- |
@@ -86,6 +86,7 @@ Framelock is engineered for complete keyboard-only and screen-reader operation:
 | **`[1]` – `[4]`** | Jump directly to Shot 1 through Shot 4 |
 | **`[N]`** | Narrate active shot visual description and continuity state aloud |
 | **`[Y]`** | Accept and apply the proposed `sam-3.1` continuity fix on the active shot |
+| **`[B]`** | Compare Before / After `sam-3.1` repair (0 outside-mask pixel drift) |
 | **`[M]`** | Toggle the `sam-3.1` segmentation bounding box and alpha mask overlay |
 | **`[A]`** | Run full sequence continuity audit (`muse-spark-1.3`) |
 | **`[G]`** | Parse transcript and regenerate storyboard frames (`muse-image-1.0`) |
