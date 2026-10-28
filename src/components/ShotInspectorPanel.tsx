@@ -1,0 +1,343 @@
+import React, { useState } from 'react';
+import {
+  AlertTriangle,
+  CheckCircle2,
+  Volume2,
+  Wand2,
+  RotateCcw,
+  Layers,
+  History,
+  Cpu,
+  Sliders,
+} from 'lucide-react';
+import { ModelInvocationRecord, StoryboardShot } from '../types/framelock';
+
+interface ShotInspectorPanelProps {
+  activeShot: StoryboardShot | null;
+  showSamMaskOverlay: boolean;
+  isProcessing: boolean;
+  modelLogs: ModelInvocationRecord[];
+  onToggleSamMaskOverlay: () => void;
+  onNarrateShot: (shot: StoryboardShot) => void;
+  onApplyProposedFix: (shotId: string, customColor?: string) => void;
+  onSegmentObjectManual: (shotId: string, targetObject: string) => void;
+  onRevertShotRevision: (shotId: string, revisionId: string) => void;
+  onUpdateShotPrompt: (shotId: string, newPrompt: string, newDuration: number) => void;
+}
+
+const COLOR_SWATCH_OPTIONS = [
+  { name: 'blue', label: 'Cobalt Blue', hex: '#2563EB' },
+  { name: 'emerald', label: 'Emerald Green', hex: '#10B981' },
+  { name: 'amber', label: 'Amber Gold', hex: '#F59E0B' },
+  { name: 'red', label: 'Crimson Red', hex: '#DC2626' },
+  { name: 'purple', label: 'Royal Violet', hex: '#7C3AED' },
+  { name: 'white', label: 'Ceramic White', hex: '#E2E8F0' },
+];
+
+export const ShotInspectorPanel: React.FC<ShotInspectorPanelProps> = ({
+  activeShot,
+  showSamMaskOverlay,
+  isProcessing,
+  modelLogs,
+  onToggleSamMaskOverlay,
+  onNarrateShot,
+  onApplyProposedFix,
+  onSegmentObjectManual,
+  onRevertShotRevision,
+  onUpdateShotPrompt,
+}) => {
+  const [selectedFixColor, setSelectedFixColor] = useState<string>('blue');
+  const [editedPrompt, setEditedPrompt] = useState<string>('');
+  const [editedDuration, setEditedDuration] = useState<number>(3.5);
+  const [lastSyncedShotId, setLastSyncedShotId] = useState<string | null>(null);
+
+  if (activeShot && activeShot.id !== lastSyncedShotId) {
+    setLastSyncedShotId(activeShot.id);
+    setEditedPrompt(activeShot.promptDescription);
+    setEditedDuration(activeShot.durationSeconds);
+    if (activeShot.proposedFix?.targetColor) {
+      setSelectedFixColor(activeShot.proposedFix.targetColor);
+    }
+  }
+
+  if (!activeShot) {
+    return (
+      <aside
+        aria-label="Shot Continuity Inspector"
+        className="w-full xl:w-[360px] shrink-0 bg-[#1E232B] border-2 border-[#323A46] rounded-lg p-5 flex flex-col justify-center items-center text-center gap-3"
+      >
+        <p className="text-base text-[#E2E8F0]">
+          Select any storyboard frame using mouse, touch, or keyboard keys <kbd className="font-mono text-[#38BDF8]">[1-4]</kbd> to inspect continuity and SAM 3.1 masks.
+        </p>
+      </aside>
+    );
+  }
+
+  const isMismatch = activeShot.status === 'mismatch';
+  const currentMask = activeShot.proposedFix?.mask;
+
+  return (
+    <aside
+      aria-label={`Inspector for Shot ${activeShot.shotNumber}`}
+      className="w-full xl:w-[360px] shrink-0 bg-[#1E232B] border-2 border-[#323A46] rounded-lg p-5 flex flex-col gap-5"
+    >
+      {/* Top Shot Status Header */}
+      <div className="flex flex-col gap-3 border-b border-[#323A46] pb-4">
+        <div className="flex items-center justify-between gap-2">
+          <div>
+            <span className="text-xs font-mono text-[#94A3B8] block">
+              ACTIVE INSPECTOR SELECTION
+            </span>
+            <h2 className="text-xl font-bold text-white">
+              Shot 0{activeShot.shotNumber} Diagnostics
+            </h2>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => onNarrateShot(activeShot)}
+            className="min-h-[44px] px-3.5 py-2 bg-[#16191E] border-2 border-[#4B5563] hover:border-[#38BDF8] rounded text-white text-sm font-semibold flex items-center gap-2 transition-colors whitespace-nowrap shrink-0"
+          >
+            <Volume2 className="w-4 h-4 text-[#38BDF8]" aria-hidden="true" />
+            <span>Narrate</span>
+            <kbd className="px-1.5 py-0.5 text-xs font-mono bg-[#0F172A] text-[#38BDF8] rounded">
+              [N]
+            </kbd>
+          </button>
+        </div>
+
+        {/* High-Contrast Status Banner */}
+        {isMismatch ? (
+          <div
+            role="region"
+            aria-label="Continuity Discrepancy Alert"
+            className="p-3.5 bg-[#16191E] border-2 border-[#F59E0B] rounded flex flex-col gap-2"
+          >
+            <div className="flex items-center justify-between">
+              <span className="flex items-center gap-2 text-sm font-bold text-[#FDE047]">
+                <AlertTriangle className="w-5 h-5 text-[#F59E0B] shrink-0" aria-hidden="true" />
+                <span>Continuity Discrepancy Flagged</span>
+              </span>
+              <kbd className="px-2 py-0.5 text-xs font-mono font-bold bg-[#0F172A] text-[#FDE047] rounded">
+                [Y] to Fix
+              </kbd>
+            </div>
+            <p className="text-sm text-[#E2E8F0] leading-relaxed">
+              {activeShot.discrepancyMessage}
+            </p>
+          </div>
+        ) : (
+          <div
+            role="region"
+            aria-label="Continuity Verified"
+            className="p-3.5 bg-[#16191E] border-2 border-[#10B981] rounded flex items-center justify-between gap-2"
+          >
+            <span className="flex items-center gap-2 text-sm font-bold text-white">
+              <CheckCircle2 className="w-5 h-5 text-[#10B981] shrink-0" aria-hidden="true" />
+              <span>Continuity Rules Verified</span>
+            </span>
+            <span className="text-xs font-mono text-[#34D399]">100% SYNC</span>
+          </div>
+        )}
+      </div>
+
+      {/* SAM 3.1 Segmentation & Pixel Recolor Studio */}
+      <section aria-labelledby="sam-studio-heading" className="flex flex-col gap-3 border-b border-[#323A46] pb-4">
+        <div className="flex items-center justify-between">
+          <h3 id="sam-studio-heading" className="text-base font-semibold text-white flex items-center gap-2">
+            <Layers className="w-4 h-4 text-[#38BDF8]" aria-hidden="true" />
+            <span>SAM 3.1 Object Isolation</span>
+          </h3>
+          <button
+            type="button"
+            onClick={onToggleSamMaskOverlay}
+            aria-pressed={showSamMaskOverlay}
+            className="min-h-[36px] px-2.5 py-1 bg-[#16191E] border border-[#4B5563] hover:border-[#38BDF8] rounded text-xs font-mono text-white flex items-center gap-1.5 transition-colors whitespace-nowrap"
+          >
+            <span>{showSamMaskOverlay ? 'Hide Mask' : 'Show Mask'}</span>
+            <kbd className="text-[#38BDF8]">[M]</kbd>
+          </button>
+        </div>
+
+        {currentMask ? (
+          <div className="p-3 bg-[#16191E] border border-[#323A46] rounded flex flex-col gap-2 text-xs font-mono text-[#E2E8F0] tabular-nums">
+            <div className="flex items-center justify-between">
+              <span>TARGET: &ldquo;{activeShot.proposedFix?.targetObject || 'cup'}&rdquo;</span>
+              <span className="text-[#34D399]">
+                IoU: {(currentMask.confidence * 100).toFixed(1)}%
+              </span>
+            </div>
+            <div className="text-[#94A3B8]">
+              BBOX: X:{currentMask.box.x}% Y:{currentMask.box.y}% W:{currentMask.box.width}% H:{currentMask.box.height}%
+            </div>
+          </div>
+        ) : (
+          <button
+            type="button"
+            onClick={() => onSegmentObjectManual(activeShot.id, 'cup')}
+            disabled={isProcessing}
+            className="min-h-[44px] w-full px-3 py-2 bg-[#16191E] border-2 border-[#4B5563] hover:border-[#38BDF8] rounded text-sm font-semibold text-white flex items-center justify-center gap-2 transition-colors"
+          >
+            <Layers className="w-4 h-4 text-[#38BDF8]" aria-hidden="true" />
+            <span>Run SAM 3.1 Object Segmentation</span>
+          </button>
+        )}
+
+        {/* Target Color Swatch Selector for Masked Recolor */}
+        <div className="flex flex-col gap-2">
+          <span className="text-xs font-mono text-[#E2E8F0]">
+            SELECT TARGET CONTINUITY COLOR:
+          </span>
+          <div className="grid grid-cols-3 gap-2">
+            {COLOR_SWATCH_OPTIONS.map((swatch) => {
+              const isSelected = selectedFixColor === swatch.name;
+              return (
+                <button
+                  key={swatch.name}
+                  type="button"
+                  onClick={() => setSelectedFixColor(swatch.name)}
+                  aria-pressed={isSelected}
+                  className={`min-h-[40px] px-2.5 py-1.5 rounded border-2 flex items-center gap-2 text-xs font-semibold transition-colors ${
+                    isSelected
+                      ? 'bg-[#121417] border-[#38BDF8] text-white'
+                      : 'bg-[#16191E] border-[#323A46] text-[#E2E8F0] hover:border-[#4B5563]'
+                  }`}
+                >
+                  <span
+                    className="w-3.5 h-3.5 rounded-xs border border-white shrink-0"
+                    style={{ backgroundColor: swatch.hex }}
+                    aria-hidden="true"
+                  />
+                  <span className="truncate">{swatch.name}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Primary Action: Apply SAM 3.1 Masked Recolor */}
+        <button
+          type="button"
+          onClick={() => onApplyProposedFix(activeShot.id, selectedFixColor)}
+          disabled={isProcessing}
+          className="min-h-[48px] w-full px-4 py-2.5 bg-[#38BDF8] hover:bg-[#7DD3FC] active:bg-[#0284C7] text-[#121417] font-bold text-sm rounded flex items-center justify-between transition-colors disabled:opacity-50"
+        >
+          <span className="flex items-center gap-2 whitespace-nowrap">
+            <Wand2 className="w-4 h-4 stroke-[2.5]" aria-hidden="true" />
+            <span>
+              Apply SAM 3.1 Recolor ({selectedFixColor.toUpperCase()})
+            </span>
+          </span>
+          <kbd className="px-2 py-0.5 text-xs font-mono font-bold bg-[#0F172A] text-[#38BDF8] rounded">
+            [Y]
+          </kbd>
+        </button>
+      </section>
+
+      {/* Shot Prompt & Timing Editor (`muse-image-1.0`) */}
+      <section aria-labelledby="shot-params-heading" className="flex flex-col gap-2.5 border-b border-[#323A46] pb-4">
+        <h3 id="shot-params-heading" className="text-base font-semibold text-white flex items-center gap-2">
+          <Sliders className="w-4 h-4 text-[#38BDF8]" aria-hidden="true" />
+          <span>Shot Prompt &amp; Duration</span>
+        </h3>
+        <label htmlFor="inspector-prompt-input" className="sr-only">
+          Shot Prompt Description
+        </label>
+        <textarea
+          id="inspector-prompt-input"
+          rows={2}
+          value={editedPrompt}
+          onChange={(e) => setEditedPrompt(e.target.value)}
+          className="w-full p-2.5 bg-[#16191E] border-2 border-[#323A46] rounded text-sm text-white focus:border-[#38BDF8]"
+        />
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <label htmlFor="inspector-duration-input" className="text-xs font-mono text-[#E2E8F0]">
+              DURATION (S):
+            </label>
+            <input
+              id="inspector-duration-input"
+              type="number"
+              min={1}
+              max={15}
+              step={0.5}
+              value={editedDuration}
+              onChange={(e) => setEditedDuration(parseFloat(e.target.value) || 3.5)}
+              className="w-20 min-h-[38px] px-2 bg-[#16191E] border-2 border-[#323A46] rounded text-sm font-mono text-white tabular-nums"
+            />
+          </div>
+          <button
+            type="button"
+            onClick={() => onUpdateShotPrompt(activeShot.id, editedPrompt, editedDuration)}
+            className="min-h-[38px] px-3 py-1.5 bg-[#16191E] border-2 border-[#4B5563] hover:border-[#38BDF8] rounded text-xs font-semibold text-white transition-colors whitespace-nowrap"
+          >
+            Update Shot
+          </button>
+        </div>
+      </section>
+
+      {/* Revision History Stack */}
+      <section aria-labelledby="revision-history-heading" className="flex flex-col gap-2.5 border-b border-[#323A46] pb-4">
+        <h3 id="revision-history-heading" className="text-base font-semibold text-white flex items-center gap-2">
+          <History className="w-4 h-4 text-[#38BDF8]" aria-hidden="true" />
+          <span>Frame Revision History ({activeShot.revisions.length})</span>
+        </h3>
+        <ul className="flex flex-col gap-2 max-h-36 overflow-y-auto pr-1" role="list">
+          {activeShot.revisions.map((rev, idx) => {
+            const isCurrent = rev.imageUrl === activeShot.currentImageUrl;
+            return (
+              <li
+                key={rev.revisionId}
+                className={`p-2.5 rounded border flex items-center justify-between gap-2 ${
+                  isCurrent
+                    ? 'bg-[#16191E] border-[#38BDF8]'
+                    : 'bg-[#121417] border-[#323A46]'
+                }`}
+              >
+                <div className="flex flex-col">
+                  <span className="text-xs font-mono font-bold text-white">
+                    Rev {idx + 1}: {rev.actionApplied}
+                  </span>
+                  <span className="text-xs font-mono text-[#94A3B8] tabular-nums">
+                    {new Date(rev.timestamp).toLocaleTimeString()}
+                  </span>
+                </div>
+                {!isCurrent && (
+                  <button
+                    type="button"
+                    onClick={() => onRevertShotRevision(activeShot.id, rev.revisionId)}
+                    className="min-h-[34px] px-2.5 py-1 bg-[#1E232B] border border-[#4B5563] hover:border-[#38BDF8] rounded text-xs font-mono text-[#38BDF8] flex items-center gap-1 whitespace-nowrap shrink-0"
+                  >
+                    <RotateCcw className="w-3 h-3" aria-hidden="true" />
+                    <span>Restore</span>
+                  </button>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      </section>
+
+      {/* Meta Model API Execution Log */}
+      <section aria-labelledby="model-telemetry-heading" className="flex flex-col gap-2">
+        <h3 id="model-telemetry-heading" className="text-sm font-semibold text-[#E2E8F0] flex items-center gap-2">
+          <Cpu className="w-4 h-4 text-[#38BDF8]" aria-hidden="true" />
+          <span>Meta AI Pipeline Log</span>
+        </h3>
+        <div className="bg-[#16191E] border border-[#323A46] rounded p-2.5 max-h-36 overflow-y-auto flex flex-col gap-2 font-mono text-xs">
+          {modelLogs.slice(0, 5).map((log) => (
+            <div key={log.id} className="border-b border-[#323A46]/60 pb-1.5 last:border-none last:pb-0">
+              <div className="flex items-center justify-between text-[#38BDF8]">
+                <span className="font-bold">{log.model}</span>
+                <span className="text-[#94A3B8] tabular-nums">
+                  {new Date(log.timestamp).toLocaleTimeString([], { hour12: false })}
+                </span>
+              </div>
+              <div className="text-[#E2E8F0] leading-snug">{log.summary}</div>
+            </div>
+          ))}
+        </div>
+      </section>
+    </aside>
+  );
+};

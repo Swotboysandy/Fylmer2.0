@@ -1,0 +1,6 @@
+{
+  "name": "Framelock — Accessible Voice-Directed Storyboard Studio",
+  "description": "An accessible, WCAG AAA voice-directed storyboard and continuity studio for blind, low-vision, and multimodal filmmakers powered by Meta Muse and SAM 3.1 models.",
+  "requestFramePermissions": ["microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
