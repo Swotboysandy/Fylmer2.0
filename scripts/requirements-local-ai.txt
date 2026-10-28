@@ -1,0 +1,7 @@
+# Install CUDA PyTorch separately from the official cu124 index.
+diffusers==0.35.1
+transformers==4.49.0
+accelerate==1.10.1
+safetensors==0.8.0
+numpy==1.26.4
+Pillow==11.3.0

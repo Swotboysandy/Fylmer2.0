@@ -1,0 +1,84 @@
+{
+  "testDateLocal": "2026-10-29",
+  "gpu": "RTX 3050 Laptop 4 GB",
+  "branch": "rendering-checkpoints",
+  "paidApiCalls": 0,
+  "runs": [
+    {
+      "run": "image-final",
+      "kind": "image",
+      "width": 512,
+      "height": 512,
+      "inferenceSeconds": 19.787,
+      "cudaPeakAllocatedMiB": 1201.09,
+      "denoiserForwardDevices": [
+        "cuda:0"
+      ],
+      "frames": 1,
+      "visualReview": {
+        "status": "acceptable_image_partial_prompt",
+        "method": "direct inspection of generated image or all-frame contact sheet",
+        "notes": "Recognizable blue mug, wood and sunlight. Ocean waves from prompt are absent.",
+        "productionReady": false
+      },
+      "encodingPSNRdB": null
+    },
+    {
+      "run": "video-512-chunked",
+      "kind": "video",
+      "width": 512,
+      "height": 512,
+      "inferenceSeconds": 43.777,
+      "cudaPeakAllocatedMiB": 1053.12,
+      "denoiserForwardDevices": [
+        "cuda:0"
+      ],
+      "frames": 16,
+      "visualReview": {
+        "status": "limited_motion",
+        "method": "direct inspection of generated image or all-frame contact sheet",
+        "notes": "Recognizable mug persists across all 16 inspected frames, but motion is slight and lighting flickers. Ocean omitted. Not identity-linked to the separate image.",
+        "productionReady": false
+      },
+      "encodingPSNRdB": 36.987479853237176
+    },
+    {
+      "run": "video-ocean",
+      "kind": "video",
+      "width": 512,
+      "height": 512,
+      "inferenceSeconds": 43.786,
+      "cudaPeakAllocatedMiB": 1053.12,
+      "denoiserForwardDevices": [
+        "cuda:0"
+      ],
+      "frames": 16,
+      "visualReview": {
+        "status": "visible_motion_with_artifacts",
+        "method": "direct inspection of generated image or all-frame contact sheet",
+        "notes": "All 16 frames inspected: waves and foam change visibly; rock layout broadly persists, with detail deformation and exposure variation. Not production-ready.",
+        "productionReady": false
+      },
+      "encodingPSNRdB": 34.61082107100609
+    },
+    {
+      "run": "video-low-memory",
+      "kind": "video",
+      "width": 256,
+      "height": 256,
+      "inferenceSeconds": 12.131,
+      "cudaPeakAllocatedMiB": 271.62,
+      "denoiserForwardDevices": [
+        "cuda:0"
+      ],
+      "frames": 16,
+      "visualReview": {
+        "status": "rejected",
+        "method": "direct inspection of four sampled frames",
+        "notes": "Severe multicolored distortion and flicker. Technical completion did not imply usable generation.",
+        "productionReady": false
+      },
+      "encodingPSNRdB": 28.847737061648893
+    }
+  ]
+}
