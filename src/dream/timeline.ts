@@ -52,9 +52,15 @@ export function clockLabel(seconds: number) {
     .padStart(2, '0')}`;
 }
 
+export interface SceneImage {
+  name: string;
+  data: string;
+}
 export interface DreamPlan {
   version: 1;
   story: string;
+  titles: string[];
+  images: (SceneImage | null)[];
   captions: string[];
   anchor: boolean;
   transition: Transition;
@@ -62,7 +68,9 @@ export interface DreamPlan {
 }
 export const DEFAULT_PLAN: DreamPlan = {
   version: 1,
-  story: SCENES.map((scene) => scene.caption).join(' '),
+  titles: SCENES.map((scene) => scene.place),
+  images: [null, null, null],
+  story: SCENES.map((scene) => scene.caption).join('\n\n'),
   captions: SCENES.map((scene) => scene.caption),
   anchor: true,
   transition: 'doorway',
@@ -78,6 +86,23 @@ export function readPlan(value: unknown): DreamPlan | null {
     !Array.isArray(p.captions) ||
     p.captions.length !== 3 ||
     p.captions.some((x) => typeof x !== 'string' || x.length > 160) ||
+    (p.titles !== undefined &&
+      (!Array.isArray(p.titles) ||
+        p.titles.length !== 3 ||
+        p.titles.some((title) => typeof title !== 'string' || title.length > 80))) ||
+    (p.images !== undefined &&
+      (!Array.isArray(p.images) ||
+        p.images.length !== 3 ||
+        p.images.some(
+          (image) =>
+            image !== null &&
+            (!image ||
+              typeof image.name !== 'string' ||
+              image.name.length > 200 ||
+              typeof image.data !== 'string' ||
+              image.data.length > 1500000 ||
+              !/^data:image\/jpeg;base64,[A-Za-z0-9+/]+={0,2}$/.test(image.data)),
+        ))) ||
     typeof p.anchor !== 'boolean' ||
     typeof p.reducedMotion !== 'boolean' ||
     !['doorway', 'dissolve'].includes(p.transition ?? '')
@@ -86,9 +111,25 @@ export function readPlan(value: unknown): DreamPlan | null {
   return {
     version: 1,
     story: p.story,
+    titles: p.titles ? [...p.titles] : [...DEFAULT_PLAN.titles],
+    images: p.images ? p.images.map((image) => (image ? { ...image } : null)) : [null, null, null],
     captions: [...p.captions],
     anchor: p.anchor,
     transition: p.transition!,
     reducedMotion: p.reducedMotion,
   };
+}
+
+/** Explicit editing operation: no inference or silent truncation. */
+export function storyCaptions(story: string): string[] {
+  const paragraphs = story
+    .trim()
+    .split(/\n\s*\n/)
+    .map((part) => part.replace(/\s+/g, ' ').trim());
+  if (paragraphs.length !== 3 || paragraphs.some((part) => !part || part.length > 160)) {
+    throw new Error(
+      'Write exactly three paragraphs, separated by blank lines, with up to 160 characters each.',
+    );
+  }
+  return paragraphs;
 }

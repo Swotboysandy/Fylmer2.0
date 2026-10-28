@@ -1123,3 +1123,59 @@
     font-size: 26px;
   }
 }
+
+.dream-scene-edit {
+  padding: 12px;
+  display: grid;
+  gap: 8px;
+  border-top: 1px solid var(--dream-line);
+}
+.dream-scene-edit label {
+  font-size: 12px;
+}
+.dream-studio .dream-scene-edit input[type='text'] {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid #647052;
+  border-radius: 4px;
+  padding: 9px;
+  background: #142018;
+  color: var(--dream-cream);
+  font-size: 14px;
+}
+.dream-studio .dream-scene-edit input[type='file'] {
+  width: 100%;
+  min-width: 0;
+  padding: 0;
+  min-height: 32px;
+  font-size: 11px;
+  color: var(--dream-cream);
+  background: transparent;
+  border: 0;
+}
+.dream-studio .dream-scene-edit input::file-selector-button {
+  background: #d6ecae;
+  color: #27351f;
+  border: 0;
+  border-radius: 4px;
+  padding: 8px;
+  margin-right: 6px;
+  cursor: pointer;
+}
+.dream-image-source {
+  margin: 0;
+  font-size: 11px;
+  color: var(--dream-muted);
+  overflow-wrap: anywhere;
+}
+.dream-scene-title strong {
+  overflow-wrap: anywhere;
+}
+.dream-scene-edit .dream-button {
+  justify-self: start;
+}
+@media (max-width: 520px) {
+  .dream-studio .dream-scene-edit input[type='text'] {
+    font-size: 16px;
+  }
+}

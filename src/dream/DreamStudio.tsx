@@ -23,10 +23,12 @@ import {
   SCENES,
   clockLabel,
   readPlan,
+  storyCaptions,
   timelineAt,
   type DreamPlan,
 } from './timeline';
 import { H, W, prepareAssets, recordDream, renderDream, type Assets } from './render';
+import { importSceneImage, imageSurface } from './images';
 import './dream.css';
 
 const STORAGE = 'framelock.dream-plan.v1';
@@ -46,6 +48,8 @@ function initialPlan(): DreamPlan {
 }
 export default function DreamStudio() {
   const [plan, setPlan] = useState<DreamPlan>(initialPlan);
+  const [samples, setSamples] = useState<Assets | null>(null);
+  const [imageBusy, setImageBusy] = useState(false);
   const [assets, setAssets] = useState<Assets | null>(null);
   const [time, setTime] = useState(0),
     [playing, setPlaying] = useState(false);
@@ -77,7 +81,7 @@ export default function DreamStudio() {
     let alive = true;
     prepareAssets()
       .then((value) => {
-        if (alive) setAssets(value);
+        if (alive) setSamples(value);
       })
       .catch((e) => {
         if (alive) setError(e.message);
@@ -87,6 +91,24 @@ export default function DreamStudio() {
       exportAbort.current?.abort();
     };
   }, []);
+  useEffect(() => {
+    if (!samples) return;
+    let alive = true;
+    setAssets(null);
+    Promise.all(
+      plan.images.map((image, index) => (image ? imageSurface(image) : samples.worlds[index])),
+    )
+      .then((worlds) => {
+        if (alive) setAssets({ worlds, anchor: samples.anchor });
+      })
+      .catch(() => {
+        if (alive)
+          setError('A saved image could not be opened. Reset that scene to its sample image.');
+      });
+    return () => {
+      alive = false;
+    };
+  }, [samples, plan.images]);
   useEffect(() => {
     try {
       localStorage.setItem(STORAGE, JSON.stringify(plan));
@@ -146,8 +168,46 @@ export default function DreamStudio() {
     setPlan((p) => ({ ...p, [key]: value }));
     setError('');
   }
+  async function chooseImage(index: number, file: File) {
+    if (recording || imageBusy) return;
+    setImageBusy(true);
+    setPlaying(false);
+    setError('');
+    try {
+      const image = await importSceneImage(file);
+      setPlan((current) => ({
+        ...current,
+        images: current.images.map((old, i) => (i === index ? image : old)),
+      }));
+      setNotice(`Scene ${index + 1} now uses ${image.name}. The image stays on this device.`);
+    } catch (error) {
+      setError(error instanceof Error ? error.message : 'Could not load this image.');
+    } finally {
+      setImageBusy(false);
+    }
+  }
+  function resetImage(index: number) {
+    setPlaying(false);
+    setPlan((current) => ({
+      ...current,
+      images: current.images.map((old, i) => (i === index ? null : old)),
+    }));
+    setError('');
+    setNotice(`Scene ${index + 1} restored to its sample image.`);
+  }
+  function applyStory() {
+    try {
+      const captions = storyCaptions(plan.story);
+      update('captions', captions);
+      setNotice(
+        'Your three paragraphs are now the scene captions. Images stay as you selected them.',
+      );
+    } catch (error) {
+      setError((error as Error).message);
+    }
+  }
   async function exportFilm() {
-    if (!assets || recording) return;
+    if (!assets || recording || imageBusy) return;
     setPlaying(false);
     setError('');
     setProgress(0);
@@ -179,9 +239,16 @@ export default function DreamStudio() {
       {
         ...plan,
         durationSeconds: DURATION,
-        worlds: SCENES.map((s) => s.id),
+        worlds: plan.titles,
+        imageSources: plan.images.map((image, index) =>
+          image
+            ? { type: 'local-image', name: image.name }
+            : { type: 'procedural-sample', id: SCENES[index].id },
+        ),
         provenance: {
-          visuals: 'Original procedural sample illustrations',
+          visuals: plan.images.some(Boolean)
+            ? 'User-selected local images and any remaining procedural samples; resized images embedded in plan'
+            : 'Original procedural sample illustrations',
           anchor: 'Cup cutout from the existing hand-authored sample mask',
           modelCalls: 0,
           rendering: 'Canvas layered transitions; not generative video',
@@ -189,7 +256,7 @@ export default function DreamStudio() {
       },
       'dream-journey-plan.json',
     );
-    setNotice('Dream plan downloaded. It includes the sample asset provenance.');
+    setNotice('Dream plan downloaded with your story, resized images and source labels.');
   }
   return (
     <MotionConfig reducedMotion="user">
@@ -222,7 +289,7 @@ export default function DreamStudio() {
             </div>
             <span className="dream-saved">
               <span />
-              {saved ? 'Plan saved on this device' : 'Plan stays in this session'}
+              {saved ? 'Plan saved on this device' : 'Not saved � download your plan'}
             </span>
           </motion.div>
           <div className="dream-layout">
@@ -249,9 +316,12 @@ export default function DreamStudio() {
                     aria-describedby="dream-notes-help"
                   />
                   <p id="dream-notes-help" className="dream-help">
-                    Notes save with your plan. This preview uses the three sample worlds below; it
-                    doesn’t generate images from your words yet.
+                    Write three paragraphs separated by blank lines, up to 160 characters each.
+                    Applying them replaces the scene captions; your selected images stay unchanged.
                   </p>
+                  <button type="button" className="dream-button" onClick={applyStory}>
+                    Use paragraphs as captions
+                  </button>
                 </section>
                 <section className="dream-panel">
                   <div className="dream-panel-title">
@@ -317,8 +387,10 @@ export default function DreamStudio() {
                 </section>
               </fieldset>
               <div className="dream-sample-note">
-                <span>OFFLINE ANIMATION STUDY</span>
-                <p>Original sample artwork and layered transitions. No AI video or Meta calls.</p>
+                <span>OFFLINE STORY EDITOR</span>
+                <p>
+                  Your images stay on this device. Layered transitions, no AI video or Meta calls.
+                </p>
               </div>
             </motion.aside>
             <div className="dream-film-column">
@@ -334,7 +406,7 @@ export default function DreamStudio() {
                     DREAM JOURNEY
                   </span>
                   <span>
-                    {String(active + 1).padStart(2, '0')} / 03 <b>·</b> {SCENES[active].place}
+                    {String(active + 1).padStart(2, '0')} / 03 <b>·</b> {plan.titles[active]}
                   </span>
                 </div>
                 <div className="dream-canvas-wrap">
@@ -343,7 +415,7 @@ export default function DreamStudio() {
                     width={W}
                     height={H}
                     role="img"
-                    aria-label={`Offline dream illustration: ${SCENES[active].place}. ${plan.anchor ? 'The same red mug cutout stays in the foreground.' : 'The mug is hidden.'}`}
+                    aria-label={`Offline dream illustration: ${plan.titles[active]}. ${plan.anchor ? 'The same red mug cutout stays in the foreground.' : 'The mug is hidden.'}`}
                   >
                     <p>{plan.captions[active]}</p>
                   </canvas>
@@ -357,12 +429,14 @@ export default function DreamStudio() {
                     {plan.anchor ? <LockKeyhole size={12} /> : <Focus size={12} />}{' '}
                     {plan.anchor ? 'Mug anchored' : 'World only'}
                   </span>
-                  <span className="dream-study-badge">SAMPLE VISUALS</span>
+                  <span className="dream-study-badge">
+                    {plan.images[active] ? 'LOCAL IMAGE' : 'SAMPLE VISUALS'}
+                  </span>
                 </div>
                 <div className="dream-transport">
                   <button
                     className="dream-play"
-                    disabled={!assets || recording}
+                    disabled={!assets || recording || imageBusy}
                     aria-label={playing ? 'Pause dream' : 'Play dream'}
                     onClick={() => {
                       if (time >= DURATION) {
@@ -403,8 +477,12 @@ export default function DreamStudio() {
               </motion.section>
               <div className="dream-scene-heading">
                 <h2>Your three worlds</h2>
-                <span>Choose a scene to jump. Edit its caption below.</span>
+                <span>Add images and edit the three scenes of your story.</span>
               </div>
+              <p className="dream-help">
+                JPEG, PNG or WebP; up to 8 MB and 24 megapixels. Images fit inside the frame with
+                dark margins; local copies are resized to 1120 x 700. Save your plan as a backup.
+              </p>
               <div className="dream-scenes">
                 {SCENES.map((scene, index) => (
                   <motion.article
@@ -416,7 +494,7 @@ export default function DreamStudio() {
                     <button
                       onClick={() => seek((index * DURATION) / 3)}
                       disabled={recording}
-                      aria-label={`Show ${scene.place}`}
+                      aria-label={`Show ${plan.titles[index]}`}
                       aria-pressed={active === index}
                     >
                       <div className="dream-scene-thumb">
@@ -425,12 +503,54 @@ export default function DreamStudio() {
                         {active === index ? <span className="dream-now">ON SCREEN</span> : null}
                       </div>
                       <div className="dream-scene-title">
-                        <strong>{scene.place}</strong>
-                        <small>{scene.title}</small>
+                        <strong>{plan.titles[index] || `Scene ${index + 1}`}</strong>
+                        <small>{plan.images[index] ? 'Your local image' : scene.title}</small>
                       </div>
                     </button>
+                    <div className="dream-scene-edit">
+                      <label htmlFor={`title-${index}`}>Scene {index + 1} title</label>
+                      <input
+                        id={`title-${index}`}
+                        type="text"
+                        maxLength={80}
+                        value={plan.titles[index]}
+                        disabled={recording}
+                        onChange={(event) =>
+                          update(
+                            'titles',
+                            plan.titles.map((title, i) =>
+                              i === index ? event.target.value : title,
+                            ),
+                          )
+                        }
+                      />
+                      <label htmlFor={`image-${index}`}>Image for scene {index + 1}</label>
+                      <input
+                        id={`image-${index}`}
+                        type="file"
+                        accept="image/jpeg,image/png,image/webp"
+                        disabled={recording || imageBusy}
+                        onChange={(event) => {
+                          const file = event.target.files?.[0];
+                          event.target.value = '';
+                          if (file) void chooseImage(index, file);
+                        }}
+                      />
+                      <p className="dream-image-source">
+                        {plan.images[index]?.name || 'Original sample illustration'}
+                      </p>
+                      {plan.images[index] ? (
+                        <button
+                          className="dream-button"
+                          disabled={recording || imageBusy}
+                          onClick={() => resetImage(index)}
+                        >
+                          Reset scene {index + 1} image
+                        </button>
+                      ) : null}
+                    </div>
                     <label htmlFor={`caption-${index}`} className="sr-only">
-                      Caption for {scene.place}
+                      Caption for {plan.titles[index]}
                     </label>
                     <textarea
                       id={`caption-${index}`}
@@ -451,20 +571,23 @@ export default function DreamStudio() {
                 <div>
                   <p className="dream-eyebrow">KEEP THE DREAM</p>
                   <h2>Take this little world with you.</h2>
-                  <p>Download the 20-second silent preview, a still, or your editable plan.</p>
+                  <p>
+                    Download the 20-second silent preview, a still, or a plan containing your
+                    resized images.
+                  </p>
                 </div>
                 <div className="dream-export-actions">
                   <button
                     className="dream-button primary"
                     onClick={() => void exportFilm()}
-                    disabled={!assets || recording}
+                    disabled={!assets || recording || imageBusy}
                   >
                     <ArrowDownToLine size={16} />
                     {recording ? `Recording ${Math.round(progress! * 100)}%` : 'Export WebM'}
                   </button>
                   <button
                     className="dream-button"
-                    disabled={!assets || recording}
+                    disabled={!assets || recording || imageBusy}
                     onClick={() => {
                       if (canvas.current)
                         download(canvas.current.toDataURL('image/png'), 'dream-frame.png');

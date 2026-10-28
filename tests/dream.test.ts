@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { DURATION, DEFAULT_PLAN, portalEase, readPlan, timelineAt } from '../src/dream/timeline';
+import {
+  DURATION,
+  DEFAULT_PLAN,
+  portalEase,
+  readPlan,
+  storyCaptions,
+  timelineAt,
+} from '../src/dream/timeline';
 
 describe('dream timing and saved plans', () => {
   it('clamps seeking and ends on the last world without wrapping', () => {
@@ -38,5 +45,30 @@ describe('dream timing and saved plans', () => {
     expect(readPlan({ ...DEFAULT_PLAN, story: 'a'.repeat(2001) })).toBeNull();
     expect(readPlan({ ...DEFAULT_PLAN, transition: 'unknown' })).toBeNull();
     expect(readPlan(null)).toBeNull();
+  });
+});
+
+describe('offline scene edits', () => {
+  it('migrates old plans and validates image metadata without allowing remote sources', () => {
+    const { titles, images, ...oldPlan } = DEFAULT_PLAN;
+    expect(readPlan(oldPlan)?.titles).toEqual(titles);
+    expect(readPlan(oldPlan)?.images).toEqual([null, null, null]);
+    expect(
+      readPlan({
+        ...DEFAULT_PLAN,
+        images: [{ name: 'bad', data: 'https://example.com/image.jpg' }, null, null],
+      }),
+    ).toBeNull();
+    expect(readPlan({ ...DEFAULT_PLAN, titles: ['one'] })).toBeNull();
+    expect(readPlan({ ...DEFAULT_PLAN, images: [null] })).toBeNull();
+  });
+  it('applies three paragraphs exactly and rejects ambiguous or overlong input', () => {
+    expect(storyCaptions('A forest.\n\nA lake.\n\nA mountain.')).toEqual([
+      'A forest.',
+      'A lake.',
+      'A mountain.',
+    ]);
+    expect(() => storyCaptions('Only one paragraph.')).toThrow('exactly three');
+    expect(() => storyCaptions('a'.repeat(161) + '\n\nb\n\nc')).toThrow('160');
   });
 });

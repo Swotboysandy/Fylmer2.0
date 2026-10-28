@@ -24,8 +24,8 @@ Sources: https://motion.dev/docs/react and https://base-ui.com/react/overview/qu
 
 ## What remains, in priority order
 
-1. Personal media: import three source images, show their provenance, and replace sample worlds without network calls. Include reset and invalid-file handling.
-2. Directing: editable scene order, per-scene descriptions, an explicit plan approval step, and import of saved plans. Notes currently do not alter the worlds.
+1. Completed in this branch: local scene image import, provenance labels, reset, bounded-file validation and local persistence. Original target: import three source images, show their provenance, and replace sample worlds without network calls. Include reset and invalid-file handling.
+2. Directing: scene titles and captions are editable, with an explicit three-paragraph apply action. Remaining: editable scene order, an approval step, and import of saved plans. Story text does not generate images.
 3. Narration: local recording/import, playback sync and audio-inclusive export. Current output is silent WebM.
 4. Meta integration, after the user enables it: transcription/reasoning, image generation and actual SAM selection. Current dream flow performs zero model calls. The frame editor adapter has not been verified live.
 5. Cinematic transitions: compare a controlled distortion or portal shader with the existing doorway; validate rendered export and reduced-motion fallback. Do not label it generative morphing.

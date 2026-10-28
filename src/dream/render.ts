@@ -239,7 +239,7 @@ export function renderDream(
     ctx.drawImage(assets.worlds[next], 0, 0);
     ctx.restore();
   }
-  if (index === 1 && !plan.reducedMotion && blend === 0) {
+  if (index === 1 && !plan.images[index] && !plan.reducedMotion && blend === 0) {
     ctx.save();
     ctx.strokeStyle = '#cce1c326';
     ctx.lineWidth = 1;
@@ -256,22 +256,22 @@ export function renderDream(
     ctx.restore();
   }
   // The ledge and cup use fixed source geometry across all worlds, never a regenerated identity.
-  const ledge = ctx.createLinearGradient(0, 570, 0, H);
-  ledge.addColorStop(0, '#263732');
-  ledge.addColorStop(1, '#172725');
-  ctx.fillStyle = ledge;
-  ctx.beginPath();
-  ctx.moveTo(0, 592);
-  ctx.lineTo(W, 618);
-  ctx.lineTo(W, H);
-  ctx.lineTo(0, H);
-  ctx.fill();
-  ctx.strokeStyle = '#9ca68d55';
-  ctx.beginPath();
-  ctx.moveTo(0, 592);
-  ctx.lineTo(W, 618);
-  ctx.stroke();
   if (plan.anchor) {
+    const ledge = ctx.createLinearGradient(0, 570, 0, H);
+    ledge.addColorStop(0, '#263732');
+    ledge.addColorStop(1, '#172725');
+    ctx.fillStyle = ledge;
+    ctx.beginPath();
+    ctx.moveTo(0, 592);
+    ctx.lineTo(W, 618);
+    ctx.lineTo(W, H);
+    ctx.lineTo(0, H);
+    ctx.fill();
+    ctx.strokeStyle = '#9ca68d55';
+    ctx.beginPath();
+    ctx.moveTo(0, 592);
+    ctx.lineTo(W, 618);
+    ctx.stroke();
     ctx.save();
     ctx.fillStyle = '#070f0f55';
     ctx.beginPath();
@@ -281,6 +281,10 @@ export function renderDream(
     ctx.restore();
   }
   const caption = plan.captions[blend > 0.5 && !plan.reducedMotion ? next : index];
+  if (!plan.anchor) {
+    ctx.fillStyle = '#102019d9';
+    ctx.fillRect(0, 615, W, 85);
+  }
   ctx.font = '18px "DM Sans", sans-serif';
   ctx.fillStyle = '#e5e7d9';
   ctx.textBaseline = 'top';
