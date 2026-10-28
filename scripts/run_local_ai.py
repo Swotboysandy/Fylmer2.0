@@ -26,17 +26,19 @@ def main():
     import torch
     import safetensors
     import safetensors.torch
-    # Scope the supported non-mapped backend to this isolated worker.
+    # Use the tested per-pipeline SafeTensors backend in this isolated worker.
     # Set it before Diffusers/Transformers import and bind their safe_open references.
+    import sys
+    backend = "pread" if sys.argv[1] == "video" else "mmap"
     original_reader = safetensors.safe_open
     def safe_reader(*args, **kwargs):
-        kwargs["backend"] = "pread"
+        kwargs["backend"] = backend
         return original_reader(*args, **kwargs)
     safetensors.safe_open = safe_reader
     safetensors.torch.safe_open = safe_reader
     from PIL import Image
     from diffusers import StableDiffusionPipeline, AnimateDiffPipeline, MotionAdapter, EulerDiscreteScheduler, UNet2DConditionModel, UNetMotionModel
-    from accelerate import init_empty_weights
+    from accelerate import init_empty_weights, disk_offload, cpu_offload
     from safetensors.torch import load_file
     parser=argparse.ArgumentParser()
     parser.add_argument("kind", choices=["image","video"])
@@ -44,12 +46,13 @@ def main():
     parser.add_argument("--seed",type=int,default=42)
     parser.add_argument("--prompt",default=PROMPT)
     parser.add_argument("--size",type=int,choices=[256,384,512])
-    parser.add_argument("--offload",choices=["model","sequential"],default="sequential")
+    parser.add_argument("--offload",choices=["model","sequential","disk"])
     args=parser.parse_args()
+    args.offload = args.offload or ("disk" if args.kind == "video" else "sequential")
     out=args.output or RUNTIME/"outputs"/args.kind
     out.mkdir(parents=True,exist_ok=True)
     report={"kind":args.kind,"prompt":args.prompt,"negativePrompt":NEGATIVE,"seed":args.seed,
-        "network":"disabled: local_files_only + HF offline","weightLoader":"safetensors pread","paidApiCalls":0,
+        "network":"disabled: local_files_only + HF offline","weightLoader":f"safetensors 0.8 {backend}","paidApiCalls":0,
         "versions":{name:importlib.metadata.version(name) for name in ["torch","diffusers","transformers","accelerate","safetensors"]},
         "status":"running","startedAt":datetime.now(timezone.utc).isoformat()}
     report_path=out/"inference-report.json"
@@ -60,6 +63,17 @@ def main():
         report["gpu"]=torch.cuda.get_device_name(0)
         report["gpuTotalMiB"]=round(torch.cuda.get_device_properties(0).total_memory/2**20)
         report["baseModel"]={k:manifest("sd15")[k] for k in ["repository","revision"]}
+        def memory_snapshot(label):
+            if os.name != 'nt': return
+            import ctypes
+            class MemoryStatus(ctypes.Structure):
+                _fields_ = [("length", ctypes.c_ulong), ("load", ctypes.c_ulong)] + [(name, ctypes.c_ulonglong) for name in ["totalPhys", "availPhys", "totalPageFile", "availPageFile", "totalVirtual", "availVirtual", "availExtended"]]
+            mem=MemoryStatus();mem.length=ctypes.sizeof(mem)
+            ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(mem))
+            report.setdefault("systemMemory", {})[label]={"availableRAMMiB":round(mem.availPhys/2**20), "availableCommitMiB":round(mem.availPageFile/2**20)}
+            print(label,report["systemMemory"][label],flush=True)
+            save()
+        memory_snapshot("beforeLoad")
         torch.set_num_threads(4)
         started=time.perf_counter()
         base=RUNTIME/"models/sd15"
@@ -81,20 +95,34 @@ def main():
             weights={**base_unet.state_dict(),**adapter.state_dict()}
             motion_unet.load_state_dict(weights,strict=True,assign=True)
             motion_unet.to(dtype=torch.float16).eval()
-            motion_unet.enable_forward_chunking(chunk_size=4 if args.size == 384 else 16, dim=1)
+            # Chunk spatial attention by frame and temporal attention by pixel batch.
+            # Sequence-axis chunking left temporal activations unbounded at 16 frames.
+            temporal_chunk = {256: 16, 384: 4, 512: 64}[args.size or 512]
+            for name, module in motion_unet.named_modules():
+                if hasattr(module, "set_chunk_feed_forward"):
+                    module.set_chunk_feed_forward(chunk_size=temporal_chunk if "motion_modules" in name else 1, dim=0)
             del weights, base_unet, adapter
             gc.collect()
+            if args.offload == "disk":
+                cache_key = hashlib.sha256((report["baseModel"]["revision"] + report["motionModel"]["revision"]).encode()).hexdigest()[:16]
+                print("Preparing local disk offload cache on F:…", flush=True)
+                disk_offload(motion_unet, RUNTIME/"cache"/f"motion-{cache_key}", execution_device=torch.device("cuda:0"))
+                gc.collect()
             pipe=AnimateDiffPipeline.from_pretrained(str(base),unet=motion_unet,
                 torch_dtype=torch.float16,variant="fp16",use_safetensors=True,local_files_only=True)
             pipe.scheduler=EulerDiscreteScheduler.from_config(pipe.scheduler.config,
                 timestep_spacing="trailing",beta_schedule="linear")
             width=height=args.size or 512;steps=4
-        if args.offload=="sequential": pipe.enable_sequential_cpu_offload()
+        if args.offload == "disk":
+            if args.kind != "video": raise ValueError("Disk offload is supported for video only")
+            for component in [pipe.text_encoder, pipe.vae]:
+                cpu_offload(component, execution_device=torch.device("cuda:0"), offload_buffers=True)
+        elif args.offload=="sequential": pipe.enable_sequential_cpu_offload()
         else: pipe.enable_model_cpu_offload()
         pipe.enable_vae_slicing()
         report["loadSeconds"]=round(time.perf_counter()-started,3)
         report.update(width=width,height=height,steps=steps,offload=args.offload,
-            forwardChunkSize=(4 if args.size == 384 else 16) if args.kind == "video" else None)
+            forwardChunking={"dimension":0,"spatial":1,"temporal":temporal_chunk} if args.kind == "video" else None)
         forward_devices=[]
         def observe(module,inputs,output):
             sample=getattr(output,"sample",output[0] if isinstance(output,tuple) else None)
@@ -110,6 +138,7 @@ def main():
             callback_on_step_end=step_callback)
         if args.kind=="video": options.update(num_frames=16,guidance_scale=1.0,decode_chunk_size=1)
         else: options.update(guidance_scale=7.5)
+        memory_snapshot("beforeInference")
         print(f"Generating {width}x{height}, {steps} steps, seed {args.seed}", flush=True)
         with torch.inference_mode():
             result=pipe(**options)
@@ -170,7 +199,7 @@ def main():
         save();print(json.dumps(report,indent=2),flush=True)
         del pipe;gc.collect();torch.cuda.empty_cache()
     except Exception as error:
-        report["status"]="failed";report["error"]=str(error)
+        report["status"]="failed";report["error"]=str(error) or type(error).__name__
         if torch.cuda.is_initialized():
             report["cudaPeakAllocatedMiB"]=round(torch.cuda.max_memory_allocated()/2**20,2)
             report["cudaPeakReservedMiB"]=round(torch.cuda.max_memory_reserved()/2**20,2)

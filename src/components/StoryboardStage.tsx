@@ -235,7 +235,7 @@ export const StoryboardStage: React.FC<StoryboardStageProps> = ({
             return (
               <article
                 key={shot.id}
-                aria-label={`Shot ${shot.shotNumber}, ${shot.status === 'mismatch' ? 'Continuity Discrepancy Flagged' : 'Continuity Verified'}`}
+                aria-label={`Shot ${shot.shotNumber}, ${shot.status === 'uncertain' ? 'Continuity Unreviewed' : shot.status === 'mismatch' ? 'Continuity Discrepancy Flagged' : 'Continuity Verified'}`}
                 onClick={() => onSelectShot(shot.id, false)}
                 className={`bg-[#1E232B] rounded-lg p-4 flex flex-col gap-3.5 transition-colors cursor-pointer ${
                   isSelected
@@ -261,7 +261,7 @@ export const StoryboardStage: React.FC<StoryboardStageProps> = ({
                   </div>
 
                   {/* High-Contrast Discrepancy / Verified Indicator */}
-                  {isMismatch ? (
+                  {shot.status === 'uncertain' ? <span className="text-xs font-mono text-[#FDE047]">UNREVIEWED</span> : isMismatch ? (
                     <div className="px-2.5 py-1 bg-[#16191E] border-2 border-[#F59E0B] rounded flex items-center gap-1.5 text-xs font-mono font-bold text-[#FDE047] whitespace-nowrap shrink-0">
                       <AlertTriangle className="w-4 h-4 text-[#F59E0B]" aria-hidden="true" />
                       <span>MISMATCH</span>
@@ -282,7 +282,7 @@ export const StoryboardStage: React.FC<StoryboardStageProps> = ({
                     src={shot.currentImageUrl}
                     alt={shot.spokenDescription}
                     referrerPolicy="no-referrer"
-                    className="w-full h-full object-cover"
+                    className="w-full h-full object-contain"
                   />
 
                   {showSamMaskOverlay && mask && (

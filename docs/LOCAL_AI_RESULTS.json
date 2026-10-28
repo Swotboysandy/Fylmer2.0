@@ -80,5 +80,42 @@
       },
       "encodingPSNRdB": 28.847737061648893
     }
+  ],
+  "inAppRuns": [
+    {
+      "jobId": "303b7b6e-fa7e-41fa-80f8-f9dc18aab3f4",
+      "kind": "image",
+      "width": 512,
+      "height": 512,
+      "frames": 1,
+      "offload": "sequential",
+      "weightLoader": "safetensors 0.8 mmap",
+      "inferenceSeconds": 20.77,
+      "cudaPeakAllocatedMiB": 1201.09,
+      "encodingPSNRdB": null,
+      "systemMemory": null
+    },
+    {
+      "jobId": "ecf7b8c0-6794-48cb-bd9e-2c7e3b415919",
+      "kind": "video",
+      "width": 512,
+      "height": 512,
+      "frames": 16,
+      "offload": "disk",
+      "weightLoader": "safetensors 0.8 pread",
+      "inferenceSeconds": 67.677,
+      "cudaPeakAllocatedMiB": 664.4,
+      "encodingPSNRdB": 34.610838381715396,
+      "systemMemory": {
+        "beforeLoad": {
+          "availableRAMMiB": 5577,
+          "availableCommitMiB": 4056
+        },
+        "beforeInference": {
+          "availableRAMMiB": 4854,
+          "availableCommitMiB": 3299
+        }
+      }
+    }
   ]
 }

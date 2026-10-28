@@ -1,0 +1,57 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {EventEmitter} from 'node:events';
+import {PassThrough} from 'node:stream';
+import {mkdtempSync, mkdirSync, writeFileSync, rmSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import path from 'node:path';
+import {createLocalAi} from '../server/localAi.ts';
+
+test('local generation validates requests, serializes GPU work, persists results and handles failure/cancel', async t => {
+  const root=mkdtempSync(path.join(tmpdir(),'anchorshot-api-test-'));
+  const runtime=path.join(root,'.artifacts/local-ai');
+  for (const relative of ['venv/Scripts/python.exe','models/sd15/download-manifest.json','models/animatediff-lightning/download-manifest.json']) {
+    const file=path.join(runtime,relative);mkdirSync(path.dirname(file),{recursive:true});writeFileSync(file,'');
+  }
+  mkdirSync(path.join(root,'scripts')); writeFileSync(path.join(root,'scripts/run_local_ai.py'),'');
+  let worker: any; let args: string[]=[]; let folder='';
+  const launch: any = (_exe: string, argv: string[], options: any) => {
+    assert.equal(options.shell,false); args=argv; folder=argv.at(-1)!;
+    worker=new EventEmitter();worker.stdout=new PassThrough();worker.stderr=new PassThrough();
+    worker.kill=()=>setImmediate(()=>worker.emit('close',1));return worker;
+  };
+  const service=createLocalAi(root,launch);
+  const server=service.app.listen(0,'127.0.0.1');
+  await new Promise<void>(resolve=>server.once('listening',resolve));
+  const base=`http://127.0.0.1:${(server.address() as any).port}`;
+  t.after(async()=>{service.stop('test complete');await new Promise<void>(resolve=>server.close(()=>resolve()));assert.ok(root.startsWith(path.join(tmpdir(),'anchorshot-api-test-')));rmSync(root,{recursive:true,force:true});});
+  const post=(route: string,body: unknown,headers={})=>fetch(base+route,{method:'POST',headers:{'Content-Type':'application/json','X-Anchorshot-Local':'1',...headers},body:JSON.stringify(body)});
+  assert.equal((await post('/jobs',{kind:'image',prompt:''})).status,400);
+  assert.equal((await post('/jobs',{kind:'video',prompt:'waves',seed:-1})).status,400);
+  assert.equal((await post('/jobs',{kind:'image',prompt:'test'},{Origin:'https://other.invalid'})).status,403);
+  assert.equal((await post('/jobs',{kind:'image',prompt:'test'},{'X-Anchorshot-Local':'0'})).status,403);
+  const prompt='mug; $(echo not-a-shell)';
+  const created=await post('/jobs',{kind:'image',prompt});assert.equal(created.status,202); const job=await created.json();
+  assert.equal(args[args.indexOf('--prompt')+1],prompt);
+  assert.equal((await post('/jobs',{kind:'video',prompt:'waves'})).status,409);
+  worker.stdout.write('CUDA denoising pass 3\n');
+  assert.match((await (await fetch(base+'/jobs/'+job.id)).json()).message,/pass 3/);
+  writeFileSync(path.join(folder,'inference-report.json'),JSON.stringify({status:'technical_pass',frames:1}));
+  writeFileSync(path.join(folder,'generated-image.png'),'fake-test-image');
+  worker.emit('close',0);
+  assert.equal((await (await fetch(base+'/jobs/'+job.id)).json()).status,'completed');
+  assert.equal((await fetch(base+`/jobs/${job.id}/assets/generated-image.png`)).status,200);
+  assert.equal((await fetch(base+`/jobs/${job.id}/assets/job.json`)).status,404);
+  const range=await fetch(base+`/jobs/${job.id}/assets/generated-image.png`,{headers:{Range:'bytes=0-3'}});
+  assert.equal(range.status,206);assert.equal((await range.arrayBuffer()).byteLength,4);
+  const bad=await (await post('/jobs',{kind:'video',prompt:'failure'})).json();worker.emit('close',1);
+  assert.equal((await (await fetch(base+'/jobs/'+bad.id)).json()).status,'failed');
+  const cancelled=await (await post('/jobs',{kind:'video',prompt:'cancel'})).json();
+  assert.equal((await post(`/jobs/${cancelled.id}/cancel`,{})).status,200);
+  assert.equal((await (await fetch(base+'/jobs/'+cancelled.id)).json()).status,'cancelled');
+  const stored=createLocalAi(root,launch);
+  const recovered=stored.app.listen(0,'127.0.0.1');await new Promise<void>(resolve=>recovered.once('listening',resolve));
+  const recoveredJobs=await (await fetch(`http://127.0.0.1:${(recovered.address() as any).port}/jobs`)).json();
+  assert.equal(recoveredJobs.find((j:any)=>j.id===job.id).status,'completed');
+  await new Promise<void>(resolve=>recovered.close(()=>resolve()));
+});
