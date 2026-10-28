@@ -238,12 +238,19 @@ export const ShotInspectorPanel: React.FC<ShotInspectorPanelProps> = ({
 
         {currentMask ? (
           <div className="p-3 bg-[#16191E] border border-[#323A46] rounded flex flex-col gap-1.5 text-xs font-mono text-[#E2E8F0] tabular-nums">
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between gap-2">
               <span>TARGET: &ldquo;{activeShot.proposedFix?.targetObject || 'cup'}&rdquo;</span>
-              <span className="text-[#34D399]">
-                Fixture mask / IoU not measured
+              <span
+                className={`shrink-0 rounded px-2 py-0.5 text-[10px] font-bold tracking-wide ${
+                  currentMask.provenance === 'live-sam-3.1'
+                    ? 'border border-[#10B981] bg-[#064E3B] text-[#34D399]'
+                    : 'border border-[#F59E0B] bg-[#451A03] text-[#FDE047]'
+                }`}
+              >
+                {currentMask.provenance === 'live-sam-3.1' ? 'LIVE SAM 3.1' : 'OFFLINE FIXTURE'}
               </span>
             </div>
+            <div className="text-[#34D399]">Fixture mask / IoU not measured</div>
             <div className="text-[#38BDF8] truncate">
               MASK REF: {currentMask.maskRef}
             </div>
@@ -261,6 +268,27 @@ export const ShotInspectorPanel: React.FC<ShotInspectorPanelProps> = ({
             <Layers className="w-4 h-4 text-[#38BDF8]" aria-hidden="true" />
             <span>Run SAM 3.1 Object Segmentation</span>
           </button>
+        )}
+
+        {activeShot.status === 'uncertain' && (
+          <div
+            role="region"
+            aria-label="Ambiguity Resolution"
+            className="p-3 bg-[#16191E] border-2 border-[#38BDF8] rounded flex flex-col gap-2"
+          >
+            <span className="text-sm font-bold text-[#38BDF8]">Ambiguity Resolution</span>
+            <p className="text-sm text-[#E2E8F0] leading-relaxed">
+              Confirm the primary candidate mask to lock this selection and resolve the uncertain shot.
+            </p>
+            <button
+              type="button"
+              onClick={() => onApplyProposedFix(activeShot.id, selectedFixColor)}
+              disabled={isProcessing}
+              className="min-h-[44px] w-full px-3 py-2 bg-[#38BDF8] hover:bg-[#7DD3FC] active:bg-[#0284C7] text-[#121417] font-bold text-sm rounded transition-colors disabled:opacity-50"
+            >
+              Confirm Primary Candidate Mask [Y]
+            </button>
+          </div>
         )}
 
         {/* Target Color Swatch Selector for Masked Recolor */}

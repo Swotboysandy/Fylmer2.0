@@ -365,12 +365,16 @@ export class MetaModelClient {
     ];
     const angle = cameraSequence[(shotNumber - 1) % cameraSequence.length];
     const box = customBox || getTargetObjectBox(angle, targetObject);
-    const mask = generateSam3MaskData(
+    const generatedMask = generateSam3MaskData(
       `${targetObject}-shot-${shotNumber}`,
       box,
       confidence,
       revision
     );
+    const mask: SamMask = {
+      ...generatedMask,
+      provenance: generatedMask.provenance ?? 'offline-fixture',
+    };
 
     this.recordCall(
       'sam-3.1',
@@ -379,6 +383,51 @@ export class MetaModelClient {
     );
 
     return mask;
+  }
+
+  /**
+   * Locks a director-selected SAM 3.1 candidate. An `uncertain` shot becomes
+   * `consistent`, and the active mask records the chosen object id and mask reference.
+   */
+  public async disambiguateMaskSelection(
+    shot: StoryboardShot,
+    selectedObjectId: string
+  ): Promise<StoryboardShot> {
+    const candidates = shot.proposedFix?.candidates ?? [];
+    const selectedCandidate = candidates.find(
+      (candidate) => candidate.objectId === selectedObjectId
+    );
+    const currentMask = selectedCandidate ?? shot.proposedFix?.mask;
+    const revision = currentMask?.maskRef.match(/:v(d+)$/)?.[1] ?? '1';
+    const maskRef = selectedCandidate
+      ? selectedCandidate.maskRef
+      : `sam-3.1:${selectedObjectId}:v${revision}`;
+    const mask = currentMask
+      ? {
+          ...currentMask,
+          objectId: selectedObjectId,
+          maskRef,
+        }
+      : undefined;
+    const nextStatus = shot.status === 'uncertain' ? 'consistent' : shot.status;
+
+    this.recordCall(
+      'sam-3.1',
+      `disambiguateMaskSelection("${selectedObjectId}", Shot ${shot.shotNumber})`,
+      `Disambiguated Shot ${shot.shotNumber}: objectId=${selectedObjectId}, maskRef=${mask?.maskRef ?? maskRef}, status ${shot.status} → ${nextStatus}`
+    );
+
+    return {
+      ...shot,
+      status: nextStatus,
+      discrepancyMessage: shot.status === 'uncertain' ? undefined : shot.discrepancyMessage,
+      proposedFix: shot.proposedFix
+        ? {
+            ...shot.proposedFix,
+            mask: mask ?? shot.proposedFix.mask,
+          }
+        : shot.proposedFix,
+    };
   }
 
   /**
