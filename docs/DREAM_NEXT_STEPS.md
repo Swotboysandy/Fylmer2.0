@@ -18,7 +18,7 @@ These are observed directory listings, not an exhaustive inventory or a license 
 
 Motion for React is now used for short interface entrances, scene selection feedback and export-panel entry/exit. Reduced-motion preferences and Gentle playback remove these animations. Film frames still use one deterministic Canvas timeline for preview and export.
 
-Newsreader supplies editorial headings; self-hosted DM Sans supplies controls and body copy. Improved readable sizes, responsive scene cards and 16px mobile text inputs. No external font service is needed.
+The dream editor now uses a custom monochrome workbench: white surfaces, black controls, a large preview, a right-side inspector and an editable scene sequence. Self-hosted DM Sans supplies headings and controls, with 16px mobile text inputs. InspectorSection is a shared local React component. Source media keeps its original colours; the UI palette is monochrome. No external font service is needed.
 
 Sources: https://motion.dev/docs/react and https://base-ui.com/react/overview/quick-start . Base UI is a candidate for future dialogs/popovers, not a dependency added in this pass. Do not install several competing component or animation systems. Shader effects could improve transitions later, but they do not generate coherent scenes or preserve identity by themselves.
 

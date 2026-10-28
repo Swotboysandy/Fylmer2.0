@@ -162,7 +162,7 @@ for (const [name, width] of [
     ).toBe(true);
     await expect(page.getByLabel('Scene 1 title', { exact: true })).toHaveCSS(
       'background-color',
-      'rgb(20, 32, 24)',
+      'rgb(255, 255, 255)',
     );
     const result = await new AxeBuilder({ page })
       .withTags(['wcag2a', 'wcag2aa', 'wcag21aa'])

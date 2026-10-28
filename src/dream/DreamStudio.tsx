@@ -29,6 +29,7 @@ import {
 } from './timeline';
 import { H, W, prepareAssets, recordDream, renderDream, type Assets } from './render';
 import { importSceneImage, imageSurface } from './images';
+import { InspectorSection } from './EditorComponents';
 import './dream.css';
 
 const STORAGE = 'framelock.dream-plan.v1';
@@ -283,13 +284,13 @@ export default function DreamStudio() {
         <main id="dream-workspace" className="dream-main" tabIndex={-1}>
           <motion.div className="dream-heading" {...reveal}>
             <div>
-              <p className="dream-eyebrow">STORY STUDY / 001</p>
-              <h1>A door into the impossible.</h1>
-              <p>A familiar object. Three unfamiliar worlds.</p>
+              <p className="dream-eyebrow">PROJECT / 001</p>
+              <h1>Dream editor</h1>
+              <p>Three scenes. One continuous story.</p>
             </div>
             <span className="dream-saved">
               <span />
-              {saved ? 'Plan saved on this device' : 'Not saved � download your plan'}
+              {saved ? 'Plan saved on this device' : 'Not saved - download your plan'}
             </span>
           </motion.div>
           <div className="dream-layout">
@@ -301,11 +302,7 @@ export default function DreamStudio() {
             >
               <fieldset disabled={recording} className="dream-controls">
                 <legend className="sr-only">Dream settings</legend>
-                <section className="dream-panel">
-                  <div className="dream-panel-title">
-                    <span>01</span>
-                    <h2>Remember the dream</h2>
-                  </div>
+                <InspectorSection number="01" title="Remember the dream">
                   <label htmlFor="dream-story">Your dream notes</label>
                   <textarea
                     id="dream-story"
@@ -322,12 +319,8 @@ export default function DreamStudio() {
                   <button type="button" className="dream-button" onClick={applyStory}>
                     Use paragraphs as captions
                   </button>
-                </section>
-                <section className="dream-panel">
-                  <div className="dream-panel-title">
-                    <span>02</span>
-                    <h2>Choose what stays</h2>
-                  </div>
+                </InspectorSection>
+                <InspectorSection number="02" title="Choose what stays">
                   <label className="dream-anchor">
                     <span className="dream-anchor-thumb">
                       {assets ? <img src={anchorUrl} alt="" /> : <Focus size={20} />}
@@ -346,12 +339,8 @@ export default function DreamStudio() {
                   <p className="dream-help">
                     The sample mask comes from Frame lab. Live SAM selection has not been used.
                   </p>
-                </section>
-                <section className="dream-panel">
-                  <div className="dream-panel-title">
-                    <span>03</span>
-                    <h2>Let the world change</h2>
-                  </div>
+                </InspectorSection>
+                <InspectorSection number="03" title="Let the world change">
                   <div className="dream-transition" role="group" aria-label="Scene transition">
                     <button
                       aria-pressed={plan.transition === 'doorway'}
@@ -384,7 +373,7 @@ export default function DreamStudio() {
                       ? 'Scenes switch with still cuts. Sweeping reveals and water motion are off.'
                       : 'A doorway opens into the next world. The mug stays in the foreground.'}
                   </p>
-                </section>
+                </InspectorSection>
               </fieldset>
               <div className="dream-sample-note">
                 <span>OFFLINE STORY EDITOR</span>
@@ -476,7 +465,7 @@ export default function DreamStudio() {
                 </div>
               </motion.section>
               <div className="dream-scene-heading">
-                <h2>Your three worlds</h2>
+                <h2>Scene sequence</h2>
                 <span>Add images and edit the three scenes of your story.</span>
               </div>
               <p className="dream-help">
@@ -488,7 +477,7 @@ export default function DreamStudio() {
                   <motion.article
                     className={`dream-scene ${active === index ? 'is-active' : ''}`}
                     key={scene.id}
-                    animate={{ borderColor: active === index ? '#a5ba7b' : '#3c4c3c' }}
+                    animate={{ borderColor: active === index ? '#111111' : '#dedede' }}
                     transition={uiTransition}
                   >
                     <button
@@ -569,8 +558,8 @@ export default function DreamStudio() {
               </div>
               <section className="dream-delivery" aria-label="Save your dream">
                 <div>
-                  <p className="dream-eyebrow">KEEP THE DREAM</p>
-                  <h2>Take this little world with you.</h2>
+                  <p className="dream-eyebrow">DELIVERY</p>
+                  <h2>Export your film</h2>
                   <p>
                     Download the 20-second silent preview, a still, or a plan containing your
                     resized images.
