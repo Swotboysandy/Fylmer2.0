@@ -1,6 +1,6 @@
 # Dream Journey experiment
 
-Branch: `codex/dream-journey`. Keep this work separate from `main` until the direction has been discussed. Framelock remains a working title.
+Branch: `dream-journey`. Keep this work separate from `main` until the direction has been discussed. Framelock remains a working title.
 
 Open `/dream` on the local server. The original object editor is still at `/`.
 
