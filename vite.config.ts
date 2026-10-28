@@ -1,17 +1,37 @@
+import fs from 'node:fs';
+import path from 'path';
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
-import path from 'path';
+import { parse } from 'dotenv';
 import { defineConfig, type Plugin } from 'vite';
+
+function readLocalEnv(): Record<string, string> {
+  try {
+    return parse(fs.readFileSync(path.resolve(__dirname, '.env.local')));
+  } catch {
+    return {};
+  }
+}
 
 function anchorShotSamApiPlugin(): Plugin {
   return {
     name: 'anchorshot-sam-api',
     async configureServer(server) {
       const { createApp } = await import('./server/app');
+      const localEnv = readLocalEnv();
+      const rawBaseUrl = localEnv.META_API_BASE_URL ?? localEnv.VITE_META_API_BASE_URL;
+      if (rawBaseUrl && !process.env.META_API_BASE_URL) {
+        process.env.META_API_BASE_URL = rawBaseUrl;
+      }
+      const rawLimit = (process.env.SAM_MAX_REQUESTS ?? localEnv.SAM_MAX_REQUESTS ?? '').trim();
+      const parsedLimit = rawLimit ? Number.parseInt(rawLimit, 10) : 25;
+      const requestLimit =
+        Number.isInteger(parsedLimit) && parsedLimit >= 0 && parsedLimit <= 100 ? parsedLimit : 25;
+
       const apiApp = createApp({
         settings: () => ({
-          key: (process.env.META_API_KEY ?? process.env.VITE_META_AI_API_KEY ?? '').trim(),
-          requestLimit: Number(process.env.SAM_MAX_REQUESTS ?? 25),
+          key: (process.env.META_API_KEY ?? localEnv.META_API_KEY ?? '').trim(),
+          requestLimit,
         }),
       });
       server.middlewares.use(apiApp);

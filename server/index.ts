@@ -11,13 +11,21 @@ function localSettings() {
   let values: Record<string, string> = {};
   try {
     values = parse(readFileSync(resolve(root, '.env.local')));
+    const rawBaseUrl = values.META_API_BASE_URL ?? values.VITE_META_API_BASE_URL;
+    if (rawBaseUrl && !process.env.META_API_BASE_URL) {
+      process.env.META_API_BASE_URL = rawBaseUrl;
+    }
   } catch {
     /* Keyless offline mode is supported. */
   }
-  const limit = Number(process.env.SAM_MAX_REQUESTS ?? values.SAM_MAX_REQUESTS ?? 10);
+  const rawLimit = (process.env.SAM_MAX_REQUESTS ?? values.SAM_MAX_REQUESTS ?? '').trim();
+  const parsedLimit = rawLimit ? Number.parseInt(rawLimit, 10) : 10;
+  const requestLimit =
+    Number.isInteger(parsedLimit) && parsedLimit >= 0 && parsedLimit <= 100 ? parsedLimit : 10;
+
   return {
     key: (process.env.META_API_KEY ?? values.META_API_KEY ?? '').trim(),
-    requestLimit: Number.isInteger(limit) && limit >= 0 && limit <= 100 ? limit : 10,
+    requestLimit,
     port: Number(process.env.PORT ?? values.PORT ?? 4317),
   };
 }

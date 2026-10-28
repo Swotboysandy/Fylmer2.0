@@ -352,7 +352,7 @@ export class MaskTrackStore {
     },
   ): StoredMaskTrack | null {
     const trimmedObjectId = selectedObjectId.trim();
-    if (!trimmedObjectId) return null;
+    if (!trimmedObjectId || trimmedObjectId.includes(':')) return null;
 
     let targetKey: string | undefined;
     let existing: StoredMaskTrack | undefined;
@@ -496,7 +496,10 @@ export async function requestSam(
 ): Promise<SegmentationResult> {
   const client = new OpenAI({
     apiKey: key,
-    baseURL: 'https://api.meta.ai/v1',
+    baseURL:
+      process.env.META_API_BASE_URL ||
+      process.env.VITE_META_API_BASE_URL ||
+      'https://api.meta.ai/v1',
     maxRetries: 0,
     timeout: 60_000,
   });
