@@ -7,9 +7,9 @@ import {
 } from '../src/services/canvasEngine';
 import { DIRECTOR_PRESETS, metaModelClient } from '../src/services/metaModels';
 
-describe('AnchorShot Voice Studio — Local 4-Role Pipeline Verification', () => {
-  it('verifies finalized AnchorShot brand identity', () => {
-    expect(brand.name).toBe('AnchorShot');
+describe('Anchorshot Voice Studio — Local 4-Role Pipeline Verification', () => {
+  it('verifies finalized Anchorshot brand identity', () => {
+    expect(brand.name).toBe('Anchorshot');
     expect(brand.provisional).toBe(false);
   });
 

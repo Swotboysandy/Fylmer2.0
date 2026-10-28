@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "dev": "vite --port=3000 --host=127.0.0.1",
+    "dev": "vite --port=4317 --host=127.0.0.1 --strictPort",
     "dev:server": "node --watch-path=server --import tsx server/index.ts",
     "start": "tsx server/index.ts --production",
     "build": "tsc --noEmit && vite build",
@@ -17,7 +17,8 @@
     "test:e2e": "playwright test",
     "test:live": "node --import tsx scripts/test_live_sam.ts",
     "export:evidence": "node --import tsx scripts/export_evidence_bundle.ts",
-    "check": "npm run typecheck && npm run test:rendering && npm test && npm run build"
+    "check": "npm run typecheck && npm run test:rendering && npm run test:local-ai && npm test && npm run build",
+    "test:local-ai": "node --import tsx --test tests/localAi.test.ts"
   },
   "engines": {
     "node": ">=22.12.0"

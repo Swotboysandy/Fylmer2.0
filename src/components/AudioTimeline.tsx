@@ -166,7 +166,7 @@ export const AudioTimeline: React.FC<AudioTimelineProps> = ({
                   ) : (
                     <span className="flex items-center gap-1 text-xs font-mono text-[#10B981] whitespace-nowrap">
                       <CheckCircle2 className="w-3.5 h-3.5" aria-hidden="true" />
-                      <span>LOCKED</span>
+                      <span>{shot.status === 'uncertain' ? 'UNREVIEWED' : 'LOCKED'}</span>
                     </span>
                   )}
                 </div>

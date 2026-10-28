@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'path';
+import {localAiPlugin} from './server/localAi.ts';
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import { parse } from 'dotenv';
@@ -17,6 +18,7 @@ function anchorShotSamApiPlugin(): Plugin {
   return {
     name: 'anchorshot-sam-api',
     async configureServer(server) {
+      if (server.config.server.middlewareMode) return;
       const { createApp } = await import('./server/app');
       const localEnv = readLocalEnv();
       const rawBaseUrl = localEnv.META_API_BASE_URL ?? localEnv.VITE_META_API_BASE_URL;
@@ -41,18 +43,20 @@ function anchorShotSamApiPlugin(): Plugin {
 
 export default defineConfig(() => {
   return {
-    plugins: [react(), tailwindcss(), anchorShotSamApiPlugin()],
+    plugins: [react(), tailwindcss(), localAiPlugin(), anchorShotSamApiPlugin()],
+    optimizeDeps: {entries: ['index.html']},
     resolve: {
       alias: {
         '@': path.resolve(__dirname, '.'),
       },
     },
     server: {
+      host: "127.0.0.1",
       // HMR is disabled in AI Studio via DISABLE_HMR env var.
       // Do not modify—file watching is disabled to prevent flickering during agent edits.
       hmr: process.env.DISABLE_HMR !== 'true',
       // Disable file watching when DISABLE_HMR is true to save CPU during agent edits.
-      watch: process.env.DISABLE_HMR === 'true' ? null : {},
+      watch: process.env.DISABLE_HMR === 'true' ? null : {ignored: ['**/.artifacts/**', '**/.git/**']},
     },
   };
 });

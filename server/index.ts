@@ -5,6 +5,7 @@ import { resolve, dirname } from 'node:path';
 import express from 'express';
 import { parse } from 'dotenv';
 import { createApp } from './app';
+import { createLocalAi } from './localAi';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 function localSettings() {
@@ -29,8 +30,12 @@ function localSettings() {
     port: Number(process.env.PORT ?? values.PORT ?? 4317),
   };
 }
-const app = createApp({ settings: localSettings });
+const app = express();
+const localAi = createLocalAi(root);
+app.use('/api/local-ai', localAi.app);
+app.use(createApp({ settings: localSettings }));
 const server = createServer(app);
+server.once('close', () => localAi.stop('Local server stopped.'));
 if (process.argv.includes('--production')) {
   app.use(express.static(resolve(root, 'dist')));
   app.use((_req, res) => res.sendFile(resolve(root, 'dist/index.html')));

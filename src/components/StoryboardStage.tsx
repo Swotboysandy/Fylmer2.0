@@ -1,3 +1,4 @@
+import {isLocalImage} from '../services/localGeneration';
 import React from 'react';
 import { useReducedMotion } from 'motion/react';
 import { SceneTransition } from './SceneTransition';
@@ -41,6 +42,10 @@ interface StoryboardStageProps {
   onExportAnimaticVideo?: () => void;
 }
 
+const hasVerifiedRepair = (shot: StoryboardShot) =>
+  !isLocalImage(shot.currentImageUrl) && Boolean(shot.pixelVerification?.passed) &&
+  shot.currentImageUrl !== shot.originalImageUrl;
+
 export const StoryboardStage: React.FC<StoryboardStageProps> = ({
   shots,
   currentTimeSeconds,
@@ -70,7 +75,7 @@ export const StoryboardStage: React.FC<StoryboardStageProps> = ({
   const mismatchCount = shots.filter((s) => s.status === 'mismatch').length;
   const uncertainCount = shots.filter((s) => s.status === 'uncertain').length;
   const consistentCount = shots.filter((s) => s.status === 'consistent').length;
-  const hasAnyRepairedShot = shots.some((s) => s.currentImageUrl !== s.originalImageUrl);
+  const hasAnyRepairedShot = shots.some(hasVerifiedRepair);
 
   return (
     <div className="flex-1 min-w-0 flex flex-col gap-5">
@@ -225,7 +230,7 @@ export const StoryboardStage: React.FC<StoryboardStageProps> = ({
           <div className="relative aspect-video w-full bg-[#121417] border-2 border-[#323A46] rounded overflow-hidden">
             <SceneTransition
               source={
-                showBeforeComparison && activeShot.currentImageUrl !== activeShot.originalImageUrl
+                showBeforeComparison && hasVerifiedRepair(activeShot)
                   ? activeShot.originalImageUrl
                   : activeShot.currentImageUrl
               }
@@ -286,7 +291,7 @@ export const StoryboardStage: React.FC<StoryboardStageProps> = ({
             const isSelected = shot.id === activeShotId;
             const isMismatch = shot.status === 'mismatch';
             const isUncertain = shot.status === 'uncertain';
-            const isRepaired = shot.currentImageUrl !== shot.originalImageUrl;
+            const isRepaired = hasVerifiedRepair(shot);
             const displayedImageUrl =
               showBeforeComparison && isRepaired ? shot.originalImageUrl : shot.currentImageUrl;
             const mask = shot.proposedFix?.mask;
@@ -295,7 +300,9 @@ export const StoryboardStage: React.FC<StoryboardStageProps> = ({
               <article
                 key={shot.id}
                 aria-label={`Shot ${shot.shotNumber}, ${
-                  isMismatch
+                  isLocalImage(shot.currentImageUrl)
+                    ? 'Continuity Unreviewed'
+                    : isMismatch
                     ? 'Continuity Discrepancy Flagged'
                     : isUncertain
                     ? 'Continuity Uncertain Ambiguity Flagged'
@@ -328,7 +335,7 @@ export const StoryboardStage: React.FC<StoryboardStageProps> = ({
                   </div>
 
                   {/* High-Contrast Discrepancy / Uncertain / Verified Indicator */}
-                  {isMismatch ? (
+                  {isLocalImage(shot.currentImageUrl) ? <span className="text-xs font-mono text-[#FDE047]">UNREVIEWED</span> : isMismatch ? (
                     <div className="px-2.5 py-1 bg-[#16191E] border-2 border-[#F59E0B] rounded flex items-center gap-1.5 text-xs font-mono font-bold text-[#FDE047] whitespace-nowrap shrink-0">
                       <AlertTriangle className="w-4 h-4 text-[#F59E0B]" aria-hidden="true" />
                       <span>MISMATCH</span>
@@ -355,7 +362,7 @@ export const StoryboardStage: React.FC<StoryboardStageProps> = ({
                     src={displayedImageUrl}
                     alt={shot.spokenDescription}
                     referrerPolicy="no-referrer"
-                    className="w-full h-full object-cover"
+                    className="w-full h-full object-contain"
                   />
 
                   {isRepaired && (

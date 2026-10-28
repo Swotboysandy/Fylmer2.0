@@ -1,3 +1,5 @@
+import {LocalGenerationPanel} from './LocalGenerationPanel';
+import {isLocalImage} from '../services/localGeneration';
 import React, { useState } from 'react';
 import {
   AlertTriangle,
@@ -16,6 +18,7 @@ import {
 import { ModelInvocationRecord, StoryboardShot } from '../types/framelock';
 
 interface ShotInspectorPanelProps {
+  onUseLocalImage: (shotId: string, imageUrl: string, prompt: string) => void;
   activeShot: StoryboardShot | null;
   showSamMaskOverlay: boolean;
   showBeforeComparison?: boolean;
@@ -41,6 +44,7 @@ const COLOR_SWATCH_OPTIONS = [
 ];
 
 export const ShotInspectorPanel: React.FC<ShotInspectorPanelProps> = ({
+  onUseLocalImage,
   activeShot,
   showSamMaskOverlay,
   showBeforeComparison = false,
@@ -58,10 +62,12 @@ export const ShotInspectorPanel: React.FC<ShotInspectorPanelProps> = ({
   const [selectedFixColor, setSelectedFixColor] = useState<string>('blue');
   const [editedPrompt, setEditedPrompt] = useState<string>('');
   const [editedDuration, setEditedDuration] = useState<number>(3.5);
+  const [lastSyncedPrompt, setLastSyncedPrompt] = useState('');
   const [lastSyncedShotId, setLastSyncedShotId] = useState<string | null>(null);
 
-  if (activeShot && activeShot.id !== lastSyncedShotId) {
+  if (activeShot && (activeShot.id !== lastSyncedShotId || activeShot.promptDescription !== lastSyncedPrompt)) {
     setLastSyncedShotId(activeShot.id);
+    setLastSyncedPrompt(activeShot.promptDescription);
     setEditedPrompt(activeShot.promptDescription);
     setEditedDuration(activeShot.durationSeconds);
     if (activeShot.proposedFix?.targetColor) {
@@ -92,6 +98,7 @@ export const ShotInspectorPanel: React.FC<ShotInspectorPanelProps> = ({
       aria-label={`Inspector for Shot ${activeShot.shotNumber}`}
       className="w-full xl:w-[360px] shrink-0 bg-[#1E232B] border-2 border-[#323A46] rounded-lg p-5 flex flex-col gap-5"
     >
+      <LocalGenerationPanel isProcessing={isProcessing} shotId={activeShot.id} shotNumber={activeShot.shotNumber} initialPrompt={activeShot.promptDescription} onUseImage={onUseLocalImage} />
       {/* Top Shot Status Header */}
       <div className="flex flex-col gap-3 border-b border-[#323A46] pb-4">
         <div className="flex items-center justify-between gap-2">
@@ -118,7 +125,7 @@ export const ShotInspectorPanel: React.FC<ShotInspectorPanelProps> = ({
         </div>
 
         {/* High-Contrast Status Banner */}
-        {isMismatch ? (
+        {isLocalImage(activeShot.currentImageUrl) ? <p className="text-sm text-[#FDE047]">Generated image — continuity unreviewed. Sample masks cannot be applied to this image.</p> : isMismatch ? (
           <div
             role="region"
             aria-live="polite"
@@ -243,7 +250,7 @@ export const ShotInspectorPanel: React.FC<ShotInspectorPanelProps> = ({
       </div>
 
       {/* SAM 3.1 Segmentation & Pixel Recolor Studio */}
-      <section aria-labelledby="sam-studio-heading" className="flex flex-col gap-3 border-b border-[#323A46] pb-4">
+      {!isLocalImage(activeShot.currentImageUrl) && <section aria-labelledby="sam-studio-heading" className="flex flex-col gap-3 border-b border-[#323A46] pb-4">
         <div className="flex items-center justify-between">
           <h3 id="sam-studio-heading" className="text-base font-semibold text-white flex items-center gap-2">
             <Layers className="w-4 h-4 text-[#38BDF8]" aria-hidden="true" />
@@ -405,7 +412,7 @@ export const ShotInspectorPanel: React.FC<ShotInspectorPanelProps> = ({
             [Y]
           </kbd>
         </button>
-      </section>
+      </section>}
 
       {/* Shot Prompt & Timing Editor (`muse-image-1.0`) */}
       <section aria-labelledby="shot-params-heading" className="flex flex-col gap-2.5 border-b border-[#323A46] pb-4">

@@ -1,3 +1,4 @@
+import {isLocalImage} from './services/localGeneration';
 import { useReducedMotion } from 'motion/react';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -34,7 +35,7 @@ export default function App() {
     isPlayingAnimatic: false,
     isProcessing: true,
     statusAnnouncement:
-      'AnchorShot Studio initialized. Loading Sequence 01: Midnight Diner Rain and running continuity audit.',
+      'Anchorshot Studio initialized. Loading Sequence 01: Midnight Diner Rain and running continuity audit.',
   });
 
   const [activePresetId, setActivePresetId] = useState<string>(initialPreset.id);
@@ -131,7 +132,7 @@ export default function App() {
         statusAnnouncement: `Selected Shot ${target.shotNumber} of ${prev.shots.length}. ${
           target.status === 'mismatch'
             ? `Continuity Discrepancy: ${target.discrepancyMessage}`
-            : 'Continuity verified.'
+            : target.status === 'uncertain' ? 'Continuity unreviewed.' : 'Continuity verified.'
         }`,
       }));
 
@@ -210,6 +211,10 @@ export default function App() {
     async (shotId: string, customColor?: string) => {
       const targetShot = projectState.shots.find((s) => s.id === shotId);
       if (!targetShot) return;
+      if (isLocalImage(targetShot.currentImageUrl)) {
+        announceStatus('Local AI image: automatic segmentation and continuity correction are not connected. Sample masks are disabled.', true);
+        return;
+      }
 
       const ruleRevision = projectState.rules[0]?.revision || 1;
       setShowBeforeComparison(false);
@@ -277,6 +282,10 @@ export default function App() {
     async (shotId: string, targetObject: string) => {
       const targetShot = projectState.shots.find((s) => s.id === shotId);
       if (!targetShot) return;
+      if (isLocalImage(targetShot.currentImageUrl)) {
+        announceStatus('Local AI image: automatic segmentation and continuity correction are not connected. Sample masks are disabled.', true);
+        return;
+      }
 
       const primaryRuleColor = projectState.rules[0]?.expectedValue || 'blue';
       setProjectState((prev) => ({
@@ -336,7 +345,9 @@ export default function App() {
             ? {
                 ...s,
                 currentImageUrl: rev.imageUrl,
-                status: isInitialMismatch ? 'mismatch' : 'consistent',
+                status: isLocalImage(rev.imageUrl) ? 'uncertain' : isInitialMismatch ? 'mismatch' : 'consistent',
+                proposedFix: undefined,
+                pixelVerification: rev.pixelVerification,
                 discrepancyMessage: isInitialMismatch
                   ? `Restored initial revision containing continuity discrepancy (${rev.actionApplied}).`
                   : undefined,
@@ -354,6 +365,14 @@ export default function App() {
     (shotId: string, newPrompt: string, newDuration: number) => {
       const targetShot = projectState.shots.find((s) => s.id === shotId);
       if (!targetShot) return;
+      if (isLocalImage(targetShot.currentImageUrl)) {
+        setProjectState(prev => ({...prev, shots: prev.shots.map(shot => shot.id === shotId ? {
+          ...shot, promptDescription: newPrompt, durationSeconds: newDuration,
+          spokenDescription: `Shot ${shot.shotNumber}. ${newPrompt}. Local AI image, continuity unreviewed.`,
+        } : shot)}));
+        return;
+      }
+
 
       const primaryRule = projectState.rules[0];
       const targetObject = primaryRule?.targetObject || 'cup';
@@ -413,6 +432,17 @@ export default function App() {
     [projectState.shots, projectState.rules]
   );
 
+  const handleUseLocalImage = useCallback((shotId: string, imageUrl: string, prompt: string) => {
+    if (!isLocalImage(imageUrl)) return;
+    setProjectState(prev => ({...prev, isPlayingAnimatic: false, shots: prev.shots.map(shot => shot.id === shotId ? {
+      ...shot, currentImageUrl: imageUrl, promptDescription: prompt, status: 'uncertain',
+      proposedFix: undefined, discrepancyMessage: undefined, pixelVerification: undefined,
+      spokenDescription: `Shot ${shot.shotNumber}. ${prompt}. Local AI image; continuity unreviewed.`,
+      revisions: [...shot.revisions, {revisionId: `local-${Date.now()}`, timestamp: Date.now(), imageUrl, actionApplied: 'Local SD1.5 image; unreviewed'}],
+    } : shot), statusAnnouncement: 'Local image applied. Continuity remains unreviewed.'}));
+    setShowSamMaskOverlay(false);
+  }, []);
+
   // Add or update a ContinuityRule and re-audit all shots
   const handleAddOrUpdateRule = useCallback(
     async (targetObject: string, expectedValue: string) => {
@@ -434,6 +464,7 @@ export default function App() {
       // Re-audit all shots against the new expected color
       const updatedShots: StoryboardShot[] = [];
       for (const shot of projectState.shots) {
+        if (isLocalImage(shot.currentImageUrl)) { updatedShots.push({...shot, status: 'uncertain', proposedFix: undefined}); continue; }
         const mask =
           shot.proposedFix?.mask ||
           (await metaModelClient.segmentObjectWithSam3(shot.shotNumber, targetObject));
@@ -474,6 +505,11 @@ export default function App() {
 
   // Run Full Sequence Continuity Audit (`muse-spark-1.3`)
   const handleRunFullAudit = useCallback(() => {
+    const unreviewed = projectState.shots.filter(s => s.status === 'uncertain').length;
+    if (unreviewed) {
+      announceStatus(`${unreviewed} shots require review or candidate selection. Their continuity has not been verified.`, true);
+      return;
+    }
     const mismatches = projectState.shots.filter((s) => s.status === 'mismatch');
     if (mismatches.length === 0) {
       speechService.playEarcon('consistent');
@@ -706,7 +742,7 @@ export default function App() {
   // Export Project JSON
   const handleExportProjectJson = useCallback(() => {
     const exportPayload = {
-      app: 'AnchorShot',
+      app: 'Anchorshot',
       mode: 'offline-fixture',
       transitionsEnabled: transitionsEnabled && !reducedMotion,
       projectId: projectState.projectId,
@@ -738,13 +774,13 @@ export default function App() {
     a.download = `${projectState.projectId}-continuity-report.json`;
     a.click();
     URL.revokeObjectURL(url);
-    announceStatus('Exported AnchorShot storyboard and continuity report JSON.', true);
+    announceStatus('Exported Anchorshot storyboard and continuity report JSON.', true);
   }, [projectState, announceStatus, transitionsEnabled, reducedMotion]);
 
   // Export Animatic Video (.webm)
   const handleExportAnimaticVideo = useCallback(async () => {
     setIsExportingVideo(true);
-    announceStatus('Rendering 4-shot AnchorShot animatic video...', false);
+    announceStatus('Rendering 4-shot Anchorshot animatic video...', false);
     const blob = await exportStoryboardAnimaticVideo(projectState.shots, projectState.title);
     setIsExportingVideo(false);
     if (!blob) {
@@ -757,7 +793,7 @@ export default function App() {
     a.download = `${projectState.projectId}-animatic.webm`;
     a.click();
     URL.revokeObjectURL(url);
-    announceStatus('Exported AnchorShot 4-shot animatic video.', true);
+    announceStatus('Exported Anchorshot 4-shot animatic video.', true);
   }, [projectState.shots, projectState.title, projectState.projectId, announceStatus]);
 
   const handleToggleBeforeComparison = useCallback(() => {
@@ -782,6 +818,8 @@ export default function App() {
         (target.tagName === 'INPUT' ||
           target.tagName === 'TEXTAREA' ||
           target.tagName === 'SELECT' ||
+          target.tagName === 'VIDEO' || target.tagName === 'AUDIO' ||
+          target.tagName === 'BUTTON' || target.tagName === 'A' ||
           target.isContentEditable);
 
       if (isInputFocused) return;
@@ -888,7 +926,7 @@ export default function App() {
           href="#top"
           className="text-xl font-bold tracking-tight text-white font-display whitespace-nowrap shrink-0"
         >
-          AnchorShot
+          Anchorshot
         </a>
 
         {/* Zone 2: 4 concise single-line text navigation links */}
@@ -990,7 +1028,7 @@ export default function App() {
 
         {/* Center Stage: Storyboard Frames Grid / Animatic Monitor + Audio Scrubbing Timeline */}
         <div className="flex-1 min-w-0 flex flex-col gap-6">
-          <p className="text-xs font-mono text-[#94A3B8]">OFFLINE FIXTURES / No model API calls / Scores measure local checks, not AI quality</p>
+          <p className="text-xs font-mono text-[#94A3B8]">LOCAL MODE / Sample scenes + optional GPU generation / No cloud model calls</p>
           <StoryboardStage
             currentTimeSeconds={currentTimeSeconds}
             transitionsEnabled={transitionsEnabled}
@@ -1028,6 +1066,7 @@ export default function App() {
 
         {/* Right Dock: Active Shot Continuity & SAM 3.1 Inspector */}
         <ShotInspectorPanel
+          onUseLocalImage={handleUseLocalImage}
           activeShot={activeShot}
           showSamMaskOverlay={showSamMaskOverlay}
           showBeforeComparison={showBeforeComparison}
