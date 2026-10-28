@@ -292,4 +292,52 @@ describe('Role 2: SAM 3.1 maskRef, neutral object selection, track storage & amb
       revision: 3,
     });
   });
+
+  it('preserves tracks across multiple shots, scopes invalidation by concept, and enforces rate limits on /api/segment/check', async () => {
+    const app = createApp({ settings: () => ({ key: '', requestLimit: 10 }) });
+    const health = await request(app).get('/api/health');
+
+    // Shot 1 and Shot 2 with identical concept/revision do not overwrite each other
+    await request(app)
+      .post('/api/segment/check')
+      .set('X-Anchorshot-Session', health.body.sessionToken)
+      .send({ ...body, concept: 'cup', shotNumber: 1, ruleRevision: 1 });
+    await request(app)
+      .post('/api/segment/check')
+      .set('X-Anchorshot-Session', health.body.sessionToken)
+      .send({ ...body, concept: 'cup', shotNumber: 2, ruleRevision: 1 });
+    await request(app)
+      .post('/api/segment/check')
+      .set('X-Anchorshot-Session', health.body.sessionToken)
+      .send({ ...body, concept: 'jacket', shotNumber: 2, ruleRevision: 1 });
+
+    const allCupTracks = await request(app).get('/api/masks?concept=cup');
+    expect(allCupTracks.body.tracks).toHaveLength(2);
+
+    // Updating 'cup' on Shot 2 to revision 2 leaves 'jacket' on Shot 2 intact, and handles non-string expectedValue safely
+    const rev2Check = await request(app)
+      .post('/api/segment/check')
+      .set('X-Anchorshot-Session', health.body.sessionToken)
+      .send({
+        ...body,
+        concept: 'cup',
+        shotNumber: 2,
+        ruleRevision: 2,
+        expectedValue: 12345,
+        observedValue: null,
+      });
+    expect(rev2Check.status).toBe(200);
+
+    const shot2JacketTracks = await request(app).get('/api/masks?concept=jacket&shotNumber=2');
+    expect(shot2JacketTracks.body.tracks).toHaveLength(1);
+
+    // Rate-limit guard when live key is configured and requestLimit is 0
+    const limitedApp = createApp({ settings: () => ({ key: 'live-key', requestLimit: 0 }) });
+    const limitedHealth = await request(limitedApp).get('/api/health');
+    const rateLimitedRes = await request(limitedApp)
+      .post('/api/segment/check')
+      .set('X-Anchorshot-Session', limitedHealth.body.sessionToken)
+      .send(body);
+    expect(rateLimitedRes.status).toBe(429);
+  });
 });

@@ -163,10 +163,23 @@ export function evaluateSamContinuityCheck(
     observedValue?: string;
     minConfidence?: number;
     ambiguityMargin?: number;
+    revision?: number;
   },
 ): SamCheckEvidence {
-  const minConfidence = options?.minConfidence ?? 0.8;
-  const ambiguityMargin = options?.ambiguityMargin ?? 0.08;
+  const minConfidence =
+    typeof options?.minConfidence === 'number' && Number.isFinite(options.minConfidence)
+      ? Math.max(0, Math.min(1, options.minConfidence))
+      : 0.8;
+  const ambiguityMargin =
+    typeof options?.ambiguityMargin === 'number' && Number.isFinite(options.ambiguityMargin)
+      ? Math.max(0, Math.min(1, options.ambiguityMargin))
+      : 0.08;
+  const revision =
+    typeof options?.revision === 'number' && Number.isFinite(options.revision) && options.revision >= 1
+      ? Math.floor(options.revision)
+      : 1;
+  const clampConfidence = (c: number | undefined) =>
+    typeof c === 'number' && Number.isFinite(c) ? Math.max(0, Math.min(1, c)) : 0.95;
 
   if (objects.length === 0) {
     return {
@@ -184,8 +197,8 @@ export function evaluateSamContinuityCheck(
 
   // Neutral ranking: sort by confidence descending, then by bounding-box area descending
   const ranked = [...objects].sort((a, b) => {
-    const confA = a.confidence ?? 0.95;
-    const confB = b.confidence ?? 0.95;
+    const confA = clampConfidence(a.confidence);
+    const confB = clampConfidence(b.confidence);
     if (Math.abs(confB - confA) > 0.001) return confB - confA;
     const areaA = (a.bounds.right - a.bounds.left) * (a.bounds.bottom - a.bounds.top);
     const areaB = (b.bounds.right - b.bounds.left) * (b.bounds.bottom - b.bounds.top);
@@ -193,9 +206,10 @@ export function evaluateSamContinuityCheck(
   });
 
   const primary = ranked[0];
-  const primaryConf = primary.confidence ?? 0.95;
+  const primaryConf = clampConfidence(primary.confidence);
+  const normalizedConcept = concept.toLowerCase().trim().replace(/\s+/g, '-');
   const primaryMaskRef =
-    primary.maskRef ?? `sam-3.1:${concept.toLowerCase()}:${primary.objectId}:v1`;
+    primary.maskRef ?? `sam-3.1:${normalizedConcept}:${primary.objectId}:v${revision}`;
 
   // Check 1: Low IoU confidence (e.g., partial occlusion)
   if (primaryConf < minConfidence) {
@@ -216,7 +230,7 @@ export function evaluateSamContinuityCheck(
 
   // Check 2: Multiple competing candidates with nearly identical confidence
   if (ranked.length > 1) {
-    const runnerUpConf = ranked[1].confidence ?? 0.95;
+    const runnerUpConf = clampConfidence(ranked[1].confidence);
     if (Math.abs(primaryConf - runnerUpConf) < ambiguityMargin) {
       return {
         status: 'uncertain',
@@ -234,8 +248,10 @@ export function evaluateSamContinuityCheck(
 
   // Check 3: Attribute comparison (if expectedValue and observedValue are provided)
   if (
-    options?.expectedValue &&
-    options?.observedValue &&
+    typeof options?.expectedValue === 'string' &&
+    options.expectedValue.trim() &&
+    typeof options?.observedValue === 'string' &&
+    options.observedValue.trim() &&
     options.expectedValue.toLowerCase().trim() !== options.observedValue.toLowerCase().trim()
   ) {
     return {
@@ -262,7 +278,7 @@ export function evaluateSamContinuityCheck(
     candidateCount: objects.length,
     confidence: primaryConf,
     expectedValue: options?.expectedValue,
-    observedValue: options?.observedValue ?? options?.expectedValue,
+    observedValue: options?.observedValue,
     explanation: `SAM 3.1 verified "${concept}" via ${primaryMaskRef} (${(
       primaryConf * 100
     ).toFixed(1)}% IoU).`,
@@ -277,6 +293,10 @@ export class MaskTrackStore {
   private tracks = new Map<string, StoredMaskTrack>();
   private revisionCounters = new Map<string, number>();
 
+  private static trackKey(maskRef: string, shotNumber: number): string {
+    return `${maskRef}@shot-${shotNumber}`;
+  }
+
   public nextRevision(shotNumber: number, concept: string): number {
     const key = `shot-${shotNumber}:${concept.toLowerCase().trim()}`;
     const next = (this.revisionCounters.get(key) ?? 0) + 1;
@@ -284,13 +304,27 @@ export class MaskTrackStore {
     return next;
   }
 
+  public syncRevision(shotNumber: number, concept: string, revision: number): void {
+    const key = `shot-${shotNumber}:${concept.toLowerCase().trim()}`;
+    const current = this.revisionCounters.get(key) ?? 0;
+    if (revision > current) {
+      this.revisionCounters.set(key, revision);
+    }
+  }
+
   public recordTrack(entry: StoredMaskTrack): StoredMaskTrack {
-    this.tracks.set(entry.maskRef, entry);
+    this.tracks.set(MaskTrackStore.trackKey(entry.maskRef, entry.shotNumber), entry);
     return entry;
   }
 
-  public getTrack(maskRef: string): StoredMaskTrack | undefined {
-    return this.tracks.get(maskRef);
+  public getTrack(maskRef: string, shotNumber?: number): StoredMaskTrack | undefined {
+    if (shotNumber !== undefined) {
+      return this.tracks.get(MaskTrackStore.trackKey(maskRef, shotNumber));
+    }
+    for (const track of this.tracks.values()) {
+      if (track.maskRef === maskRef) return track;
+    }
+    return undefined;
   }
 
   public listTracks(concept?: string, shotNumber?: number): StoredMaskTrack[] {
@@ -306,16 +340,46 @@ export class MaskTrackStore {
     maskRef: string,
     selectedObjectId: string,
     resolvedStatus: ContinuityEvidenceStatus = 'consistent',
+    options?: {
+      shotNumber?: number;
+      bounds?: StoredMaskTrack['bounds'];
+      confidence?: number;
+    },
   ): StoredMaskTrack | null {
-    const existing = this.tracks.get(maskRef);
-    if (!existing) return null;
+    const trimmedObjectId = selectedObjectId.trim();
+    if (!trimmedObjectId) return null;
+
+    let targetKey: string | undefined;
+    let existing: StoredMaskTrack | undefined;
+
+    if (options?.shotNumber !== undefined) {
+      const candidateKey = MaskTrackStore.trackKey(maskRef, options.shotNumber);
+      existing = this.tracks.get(candidateKey);
+      if (existing) targetKey = candidateKey;
+    }
+    if (!existing) {
+      for (const [key, track] of this.tracks.entries()) {
+        if (track.maskRef === maskRef) {
+          targetKey = key;
+          existing = track;
+          break;
+        }
+      }
+    }
+    if (!existing || !targetKey) return null;
+
     const updated: StoredMaskTrack = {
       ...existing,
-      objectId: selectedObjectId,
+      objectId: trimmedObjectId,
+      bounds: options?.bounds ?? existing.bounds,
+      confidence:
+        typeof options?.confidence === 'number' && Number.isFinite(options.confidence)
+          ? Math.max(0, Math.min(1, options.confidence))
+          : existing.confidence,
       status: resolvedStatus,
-      evidence: `Director disambiguated object "${selectedObjectId}" for ${maskRef}; status locked as ${resolvedStatus}.`,
+      evidence: `Director disambiguated object "${trimmedObjectId}" for ${maskRef}; status locked as ${resolvedStatus}.`,
     };
-    this.tracks.set(maskRef, updated);
+    this.tracks.set(targetKey, updated);
     return updated;
   }
 
@@ -327,13 +391,17 @@ export class MaskTrackStore {
     shotNumber: number,
     newSourceHash?: string,
     newRuleRevision?: number,
+    concept?: string,
   ): number {
     let removed = 0;
+    const normalizedConcept = concept?.toLowerCase().trim();
     for (const [key, track] of this.tracks.entries()) {
       if (track.shotNumber !== shotNumber) continue;
       const hashChanged = Boolean(newSourceHash && track.sourceHash !== newSourceHash);
+      const conceptMatches =
+        !normalizedConcept || track.concept.toLowerCase().trim() === normalizedConcept;
       const revChanged = Boolean(
-        newRuleRevision !== undefined && track.revision < newRuleRevision,
+        conceptMatches && newRuleRevision !== undefined && track.revision < newRuleRevision,
       );
       if (hashChanged || revChanged) {
         this.tracks.delete(key);
@@ -371,11 +439,16 @@ export async function decodeOfflineSamSelection(
       source: 'sample' as const,
       confidence,
     }));
+    const check = evaluateSamContinuityCheck(decoded.objects, input.concept, { revision });
+    decoded.maskRef = check.maskRef ?? decoded.maskRef;
+    decoded.selectedObjectId = check.selectedObjectId;
+    decoded.ambiguityStatus = check.status;
+    decoded.evidence = check.explanation;
     decoded.provenance = 'offline-fixture';
     return decoded;
   }
   const requestId = randomUUID();
-  const normalizedConcept = input.concept.toLowerCase().replace(/\s+/g, '-');
+  const normalizedConcept = input.concept.toLowerCase().trim().replace(/\s+/g, '-');
   const maskRef = `sam-3.1:${normalizedConcept}:0:v${revision}`;
   const rw = Math.max(1, Math.floor(input.width / 2));
   const rh = Math.max(1, Math.floor(input.height / 2));
@@ -395,7 +468,7 @@ export async function decodeOfflineSamSelection(
     rasterBase64: Buffer.from(raster).toString('base64'),
     confidence,
   };
-  const check = evaluateSamContinuityCheck([obj], input.concept);
+  const check = evaluateSamContinuityCheck([obj], input.concept, { revision });
   return {
     requestId,
     sourceHash: input.sourceHash,
@@ -412,6 +485,7 @@ export async function requestSam(
   input: CheckedInput,
   key: string,
   signal: AbortSignal,
+  revision = 1,
 ): Promise<SegmentationResult> {
   const client = new OpenAI({
     apiKey: key,
@@ -437,5 +511,5 @@ export async function requestSam(
     },
     { signal },
   );
-  return decodeSelection(events as AsyncIterable<ResponsesEvent>, input);
+  return decodeSelection(events as AsyncIterable<ResponsesEvent>, input, revision);
 }

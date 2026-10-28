@@ -25,6 +25,7 @@ interface ShotInspectorPanelProps {
   onToggleBeforeComparison?: () => void;
   onNarrateShot: (shot: StoryboardShot) => void;
   onApplyProposedFix: (shotId: string, customColor?: string) => void;
+  onDisambiguateShot?: (shotId: string, selectedObjectId: string) => void;
   onSegmentObjectManual: (shotId: string, targetObject: string) => void;
   onRevertShotRevision: (shotId: string, revisionId: string) => void;
   onUpdateShotPrompt: (shotId: string, newPrompt: string, newDuration: number) => void;
@@ -49,6 +50,7 @@ export const ShotInspectorPanel: React.FC<ShotInspectorPanelProps> = ({
   onToggleBeforeComparison,
   onNarrateShot,
   onApplyProposedFix,
+  onDisambiguateShot,
   onSegmentObjectManual,
   onRevertShotRevision,
   onUpdateShotPrompt,
@@ -261,7 +263,9 @@ export const ShotInspectorPanel: React.FC<ShotInspectorPanelProps> = ({
         ) : (
           <button
             type="button"
-            onClick={() => onSegmentObjectManual(activeShot.id, 'cup')}
+            onClick={() =>
+              onSegmentObjectManual(activeShot.id, activeShot.proposedFix?.targetObject || 'cup')
+            }
             disabled={isProcessing}
             className="min-h-[44px] w-full px-3 py-2 bg-[#16191E] border-2 border-[#4B5563] hover:border-[#38BDF8] rounded text-sm font-semibold text-white flex items-center justify-center gap-2 transition-colors"
           >
@@ -282,7 +286,17 @@ export const ShotInspectorPanel: React.FC<ShotInspectorPanelProps> = ({
             </p>
             <button
               type="button"
-              onClick={() => onApplyProposedFix(activeShot.id, selectedFixColor)}
+              onClick={() => {
+                const candidateObjectId =
+                  activeShot.proposedFix?.candidates?.[0]?.objectId ??
+                  activeShot.proposedFix?.mask?.objectId ??
+                  '0';
+                if (onDisambiguateShot) {
+                  onDisambiguateShot(activeShot.id, candidateObjectId);
+                } else {
+                  onApplyProposedFix(activeShot.id, selectedFixColor);
+                }
+              }}
               disabled={isProcessing}
               className="min-h-[44px] w-full px-3 py-2 bg-[#38BDF8] hover:bg-[#7DD3FC] active:bg-[#0284C7] text-[#121417] font-bold text-sm rounded transition-colors disabled:opacity-50"
             >
@@ -408,11 +422,22 @@ export const ShotInspectorPanel: React.FC<ShotInspectorPanelProps> = ({
                   </span>
                   <span className="text-xs font-mono text-[#94A3B8] tabular-nums">
                     {new Date(rev.timestamp).toLocaleTimeString()}
-                    {rev.pixelVerification && <span className="block">
-                      Mask check: {rev.pixelVerification.passed ? 'PASS' : 'FAIL'} /
-                      {' '}{rev.pixelVerification.changedOutside} outside pixels changed /
-                      {' '}{rev.pixelVerification.changedInside} selected pixels edited
-                    </span>}
+                    {rev.pixelVerification && (
+                      <span className="block">
+                        Mask check:{' '}
+                        {(rev.pixelVerification.passed ??
+                        rev.pixelVerification.changedOutsideMask === 0)
+                          ? 'PASS'
+                          : 'FAIL'}{' '}
+                        /{' '}
+                        {rev.pixelVerification.changedOutsideMask ??
+                          rev.pixelVerification.changedOutside}{' '}
+                        outside pixels changed /{' '}
+                        {rev.pixelVerification.changedInsideMask ??
+                          rev.pixelVerification.changedInside}{' '}
+                        selected pixels edited
+                      </span>
+                    )}
                   </span>
                 </div>
                 {!isCurrent && (

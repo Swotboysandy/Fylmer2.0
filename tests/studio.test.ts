@@ -67,4 +67,43 @@ describe('AnchorShot Voice Studio — Local 4-Role Pipeline Verification', () =>
     expect(report.changedOutsideMask).toBe(0);
     expect(report.outsideDriftPercent).toBe(0);
   });
+
+  it('Role 2 (SAM & Checks): disambiguates uncertain shots with 4-segment maskRef and multi-digit revision', async () => {
+    const emeraldRules = await metaModelClient.extractContinuityRules(DIRECTOR_PRESETS[2].transcript);
+    expect(emeraldRules[0].expectedValue).toBe('emerald');
+
+    const resolved = await metaModelClient.disambiguateMaskSelection(
+      {
+        id: 'shot-4',
+        shotNumber: 4,
+        durationSeconds: 3.5,
+        promptDescription: 'Over-the-shoulder courier jacket check',
+        spokenDescription: 'Uncertain shot',
+        currentImageUrl: 'data:image/png;base64,AAA=',
+        originalImageUrl: 'data:image/png;base64,AAA=',
+        status: 'uncertain',
+        discrepancyMessage: 'Ambiguous occlusion',
+        proposedFix: {
+          action: 'recolor',
+          targetObject: 'courier jacket',
+          targetColor: 'emerald',
+          mask: {
+            id: 'mask-1',
+            maskRef: 'sam-3.1:courier-jacket:0:v12',
+            objectId: '0',
+            maskBase64: 'data:image/png;base64,AAA=',
+            box: { x: 20, y: 20, width: 30, height: 40 },
+            confidence: 0.72,
+          },
+        },
+        revisions: [],
+      },
+      '1'
+    );
+
+    expect(resolved.status).toBe('consistent');
+    expect(resolved.discrepancyMessage).toBeUndefined();
+    expect(resolved.proposedFix?.mask?.objectId).toBe('1');
+    expect(resolved.proposedFix?.mask?.maskRef).toBe('sam-3.1:courier-jacket:1:v12');
+  });
 });

@@ -17,7 +17,12 @@ interface Settings {
 }
 interface Options {
   settings: () => Settings;
-  segment?: (input: CheckedInput, key: string, signal: AbortSignal) => Promise<SegmentationResult>;
+  segment?: (
+    input: CheckedInput,
+    key: string,
+    signal: AbortSignal,
+    revision?: number,
+  ) => Promise<SegmentationResult>;
 }
 
 export function createApp(options: Options) {
@@ -104,6 +109,15 @@ export function createApp(options: Options) {
     if (!hasValidSession(req))
       return res.status(403).json({ error: 'Refresh the page before running a continuity check.' });
     const settings = options.settings();
+    if (active)
+      return res
+        .status(409)
+        .json({ error: 'A selection is already running. Wait for it to finish.' });
+    if (settings.key && requestsUsed >= settings.requestLimit)
+      return res
+        .status(429)
+        .json({ error: 'The session request limit has been reached. No further call was sent.' });
+    active = true;
     const controller = new AbortController();
     res.on('close', () => {
       if (!res.writableEnded) controller.abort();
@@ -112,38 +126,54 @@ export function createApp(options: Options) {
       const input = await checkInput(req.body);
       if (controller.signal.aborted) return;
 
-      const shotNumber = Number(req.body?.shotNumber ?? 1);
+      const rawShotNumber = Number(req.body?.shotNumber);
+      const shotNumber =
+        Number.isFinite(rawShotNumber) && rawShotNumber >= 1 ? Math.floor(rawShotNumber) : 1;
+      const rawRuleRevision = req.body?.ruleRevision;
       const revision =
-        typeof req.body?.ruleRevision === 'number'
-          ? req.body.ruleRevision
+        typeof rawRuleRevision === 'number' &&
+        Number.isFinite(rawRuleRevision) &&
+        rawRuleRevision >= 1
+          ? Math.floor(rawRuleRevision)
           : trackStore.nextRevision(shotNumber, input.concept);
+      trackStore.syncRevision(shotNumber, input.concept, revision);
+
       const simulatedConfidence =
-        typeof req.body?.confidence === 'number' ? req.body.confidence : 0.984;
+        typeof req.body?.confidence === 'number' && Number.isFinite(req.body.confidence)
+          ? Math.max(0, Math.min(1, req.body.confidence))
+          : 0.984;
 
       let segmentation: SegmentationResult;
-      if (settings.key && requestsUsed < settings.requestLimit) {
+      if (settings.key) {
         requestsUsed++;
         segmentation = await (options.segment ?? requestSam)(
           input,
           settings.key,
           controller.signal,
+          revision,
         );
       } else {
         segmentation = await decodeOfflineSamSelection(input, revision, simulatedConfidence);
       }
 
+      const sanitizeString = (v: unknown) =>
+        typeof v === 'string' && v.trim() ? v.trim() : undefined;
+      const sanitizeFiniteNumber = (v: unknown) =>
+        typeof v === 'number' && Number.isFinite(v) ? v : undefined;
+
       const check = evaluateSamContinuityCheck(segmentation.objects, input.concept, {
-        expectedValue: req.body?.expectedValue,
-        observedValue: req.body?.observedValue,
-        minConfidence: req.body?.minConfidence,
+        expectedValue: sanitizeString(req.body?.expectedValue),
+        observedValue: sanitizeString(req.body?.observedValue),
+        minConfidence: sanitizeFiniteNumber(req.body?.minConfidence),
+        revision,
       });
 
       const primaryObj =
         segmentation.objects.find((o) => o.objectId === check.selectedObjectId) ??
         segmentation.objects[0];
 
-      // Invalidate stale selections/proposals if sourceHash or ruleRevision changed
-      trackStore.invalidateBySourceOrRule(shotNumber, input.sourceHash, revision);
+      // Invalidate stale selections/proposals for this shot/concept if sourceHash or ruleRevision changed
+      trackStore.invalidateBySourceOrRule(shotNumber, input.sourceHash, revision, input.concept);
 
       const storedTrack =
         primaryObj && check.maskRef
@@ -176,6 +206,8 @@ export function createApp(options: Options) {
       }
     } catch (error) {
       if (!controller.signal.aborted) next(error);
+    } finally {
+      active = false;
     }
   });
 
@@ -185,8 +217,10 @@ export function createApp(options: Options) {
    */
   app.get('/api/masks', (req, res) => {
     const concept = typeof req.query.concept === 'string' ? req.query.concept : undefined;
-    const shotNumber =
+    const rawShot =
       typeof req.query.shotNumber === 'string' ? Number(req.query.shotNumber) : undefined;
+    const shotNumber =
+      rawShot !== undefined && Number.isFinite(rawShot) ? Math.floor(rawShot) : undefined;
     res.json({
       tracks: trackStore.listTracks(concept, shotNumber),
     });
@@ -200,17 +234,38 @@ export function createApp(options: Options) {
   app.post('/api/masks/disambiguate', (req, res) => {
     if (!hasValidSession(req))
       return res.status(403).json({ error: 'Refresh the page before disambiguating a mask.' });
-    const { maskRef, selectedObjectId, status } = req.body as {
+    const { maskRef, selectedObjectId, status, shotNumber, bounds, confidence } = req.body as {
       maskRef?: string;
       selectedObjectId?: string;
       status?: ContinuityEvidenceStatus;
+      shotNumber?: number;
+      bounds?: { left: number; top: number; right: number; bottom: number };
+      confidence?: number;
     };
-    if (!maskRef || !selectedObjectId) {
+    if (
+      typeof maskRef !== 'string' ||
+      !maskRef.trim() ||
+      (typeof selectedObjectId !== 'string' && typeof selectedObjectId !== 'number') ||
+      !String(selectedObjectId).trim()
+    ) {
       return res.status(400).json({ error: 'Provide both maskRef and selectedObjectId.' });
     }
     const resolvedStatus: ContinuityEvidenceStatus =
       status === 'mismatch' || status === 'uncertain' ? status : 'consistent';
-    const updated = trackStore.disambiguate(maskRef, String(selectedObjectId), resolvedStatus);
+    const validShotNumber =
+      typeof shotNumber === 'number' && Number.isFinite(shotNumber) && shotNumber >= 1
+        ? Math.floor(shotNumber)
+        : undefined;
+    const updated = trackStore.disambiguate(
+      maskRef.trim(),
+      String(selectedObjectId).trim(),
+      resolvedStatus,
+      {
+        shotNumber: validShotNumber,
+        bounds,
+        confidence,
+      },
+    );
     if (!updated) {
       return res.status(404).json({ error: `Mask reference ${maskRef} was not found.` });
     }
@@ -224,7 +279,6 @@ export function createApp(options: Options) {
   app.post('/api/muse/transcribe', (req, res) => {
     if (!hasValidSession(req))
       return res.status(403).json({ error: 'Refresh the page before transcribing.' });
-    const settings = options.settings();
     const text =
       typeof req.body?.text === 'string' && req.body.text.trim()
         ? req.body.text.trim()
@@ -233,7 +287,7 @@ export function createApp(options: Options) {
       transcript: text,
       confidence: 0.992,
       model: 'muse-voice-transcribe-1.0',
-      provenance: settings.key ? 'live-meta-api' : 'offline-fixture',
+      provenance: 'offline-fixture',
     });
   });
 
@@ -244,13 +298,16 @@ export function createApp(options: Options) {
   app.post('/api/muse/spark', (req, res) => {
     if (!hasValidSession(req))
       return res.status(403).json({ error: 'Refresh the page before running shot planning.' });
-    const settings = options.settings();
     const transcript = typeof req.body?.transcript === 'string' ? req.body.transcript : '';
     if (!transcript.trim()) {
       return res.status(400).json({ error: 'Provide a non-empty director transcript.' });
     }
     const previousRevision =
-      typeof req.body?.previousRevision === 'number' ? req.body.previousRevision : 0;
+      typeof req.body?.previousRevision === 'number' &&
+      Number.isFinite(req.body.previousRevision) &&
+      req.body.previousRevision >= 0
+        ? Math.floor(req.body.previousRevision)
+        : 0;
     const nextRevision = previousRevision + 1;
     const lower = transcript.toLowerCase();
 
@@ -263,18 +320,40 @@ export function createApp(options: Options) {
       }
     }
 
-    const knownColors = ['emerald', 'amber', 'blue', 'cobalt', 'red', 'crimson', 'purple', 'white'];
+    const knownColors = [
+      'emerald',
+      'green',
+      'amber',
+      'yellow',
+      'gold',
+      'blue',
+      'cobalt',
+      'red',
+      'crimson',
+      'purple',
+      'white',
+      'cyan',
+    ];
     let expectedValue = 'blue';
     for (const col of knownColors) {
       if (lower.includes(col)) {
-        expectedValue = col === 'cobalt' ? 'blue' : col === 'crimson' ? 'red' : col;
+        expectedValue =
+          col === 'cobalt'
+            ? 'blue'
+            : col === 'crimson'
+              ? 'red'
+              : col === 'yellow' || col === 'gold'
+                ? 'amber'
+                : col === 'green'
+                  ? 'emerald'
+                  : col;
         break;
       }
     }
 
     res.json({
       model: 'muse-spark-1.3',
-      provenance: settings.key ? 'live-meta-api' : 'offline-fixture',
+      provenance: 'offline-fixture',
       ruleRevision: nextRevision,
       rules: [
         {

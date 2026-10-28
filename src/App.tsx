@@ -247,6 +247,31 @@ export default function App() {
     [projectState.shots, projectState.rules]
   );
 
+  // Disambiguate an uncertain SAM 3.1 candidate selection (`POST /api/masks/disambiguate`)
+  const handleDisambiguateShot = useCallback(
+    async (shotId: string, selectedObjectId: string) => {
+      const targetShot = projectState.shots.find((s) => s.id === shotId);
+      if (!targetShot) return;
+
+      const updatedShot = await metaModelClient.disambiguateMaskSelection(
+        targetShot,
+        selectedObjectId
+      );
+      speechService.playEarcon('fixApplied');
+
+      const confirmationMessage = `Ambiguity resolved on Shot ${updatedShot.shotNumber}. Locked SAM 3.1 object ${selectedObjectId} (${updatedShot.proposedFix?.mask?.maskRef ?? ''}) as consistent.`;
+
+      setProjectState((prev) => ({
+        ...prev,
+        shots: prev.shots.map((s) => (s.id === shotId ? updatedShot : s)),
+        activeShotId: shotId,
+        statusAnnouncement: confirmationMessage,
+      }));
+      speechService.speak(confirmationMessage, true);
+    },
+    [projectState.shots]
+  );
+
   // Manual SAM 3.1 Segmentation trigger on any shot
   const handleSegmentObjectManual = useCallback(
     async (shotId: string, targetObject: string) => {
@@ -1012,6 +1037,7 @@ export default function App() {
           onToggleBeforeComparison={handleToggleBeforeComparison}
           onNarrateShot={handleNarrateShot}
           onApplyProposedFix={handleApplyProposedFix}
+          onDisambiguateShot={handleDisambiguateShot}
           onSegmentObjectManual={handleSegmentObjectManual}
           onRevertShotRevision={handleRevertShotRevision}
           onUpdateShotPrompt={handleUpdateShotPrompt}

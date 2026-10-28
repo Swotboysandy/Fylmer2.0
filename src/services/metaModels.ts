@@ -42,7 +42,20 @@ export const DIRECTOR_PRESETS: DirectorPresetScenario[] = [
   },
 ];
 
-const KNOWN_COLORS = ['blue', 'cobalt', 'red', 'crimson', 'amber', 'yellow', 'gold', 'green', 'emerald', 'white', 'purple', 'cyan'];
+const KNOWN_COLORS = [
+  'emerald',
+  'green',
+  'amber',
+  'yellow',
+  'gold',
+  'blue',
+  'cobalt',
+  'red',
+  'crimson',
+  'white',
+  'purple',
+  'cyan',
+];
 const KNOWN_OBJECTS = ['cup', 'mug', 'umbrella', 'jacket', 'coat'];
 
 export interface MetaApiEnvConfig {
@@ -89,9 +102,14 @@ export class MetaModelClient {
   private logs: ModelInvocationRecord[] = [];
   private onLogCallback?: (logs: ModelInvocationRecord[]) => void;
   private config: MetaApiEnvConfig = getMetaApiEnvConfig();
+  private sessionToken?: string;
 
   public getConfig(): MetaApiEnvConfig {
     return this.config;
+  }
+
+  public setSessionToken(token?: string) {
+    this.sessionToken = token;
   }
 
   public onLogUpdate(cb: (logs: ModelInvocationRecord[]) => void) {
@@ -160,7 +178,16 @@ export class MetaModelClient {
     const ruleSentence = transcript.split('.')[0]?.toLowerCase() || lower;
     for (const col of KNOWN_COLORS) {
       if (ruleSentence.includes(col)) {
-        detectedColor = col === 'cobalt' ? 'blue' : col === 'crimson' ? 'red' : col;
+        detectedColor =
+          col === 'cobalt'
+            ? 'blue'
+            : col === 'crimson'
+              ? 'red'
+              : col === 'yellow' || col === 'gold'
+                ? 'amber'
+                : col === 'green'
+                  ? 'emerald'
+                  : col;
         break;
       }
     }
@@ -321,6 +348,21 @@ export class MetaModelClient {
                 targetObject,
                 targetColor: expectedColor,
                 mask: samMask,
+                candidates:
+                  isUncertainOcclusion && samMask
+                    ? [
+                        samMask,
+                        {
+                          ...samMask,
+                          id: `${samMask.id}-alt`,
+                          objectId: '1',
+                          maskRef: `sam-3.1:${targetObject.toLowerCase().replace(/\s+/g, '-')}:1:v${primaryRule.revision}`,
+                          confidence: 0.682,
+                        },
+                      ]
+                    : samMask
+                      ? [samMask]
+                      : undefined,
               }
             : undefined,
         revisions: [
@@ -398,10 +440,14 @@ export class MetaModelClient {
       (candidate) => candidate.objectId === selectedObjectId
     );
     const currentMask = selectedCandidate ?? shot.proposedFix?.mask;
-    const revision = currentMask?.maskRef.match(/:v(d+)$/)?.[1] ?? '1';
+    const revision = currentMask?.maskRef.match(/:v(\d+)$/)?.[1] ?? '1';
+    const normalizedConcept = (shot.proposedFix?.targetObject ?? 'cup')
+      .toLowerCase()
+      .trim()
+      .replace(/\s+/g, '-');
     const maskRef = selectedCandidate
       ? selectedCandidate.maskRef
-      : `sam-3.1:${selectedObjectId}:v${revision}`;
+      : `sam-3.1:${normalizedConcept}:${selectedObjectId}:v${revision}`;
     const mask = currentMask
       ? {
           ...currentMask,
@@ -410,6 +456,27 @@ export class MetaModelClient {
         }
       : undefined;
     const nextStatus = shot.status === 'uncertain' ? 'consistent' : shot.status;
+
+    if (typeof fetch === 'function' && this.sessionToken && currentMask?.maskRef) {
+      try {
+        await fetch('/api/masks/disambiguate', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Framelock-Session': this.sessionToken,
+          },
+          body: JSON.stringify({
+            maskRef: currentMask.maskRef,
+            selectedObjectId,
+            status: nextStatus,
+            shotNumber: shot.shotNumber,
+            confidence: mask?.confidence,
+          }),
+        });
+      } catch {
+        // Non-blocking when running purely offline without Express backend
+      }
+    }
 
     this.recordCall(
       'sam-3.1',
@@ -513,7 +580,11 @@ export class MetaModelClient {
     try {
       const res = await fetch('/api/health');
       if (!res.ok) return null;
-      return await res.json();
+      const health = await res.json();
+      if (typeof health?.sessionToken === 'string') {
+        this.sessionToken = health.sessionToken;
+      }
+      return health;
     } catch {
       return null;
     }
@@ -529,7 +600,11 @@ export class MetaModelClient {
       if (concept) params.set('concept', concept);
       if (shotNumber !== undefined) params.set('shotNumber', String(shotNumber));
       const query = params.toString() ? `?${params.toString()}` : '';
-      const res = await fetch(`/api/masks${query}`);
+      const headers: Record<string, string> = {};
+      if (this.sessionToken) {
+        headers['X-Framelock-Session'] = this.sessionToken;
+      }
+      const res = await fetch(`/api/masks${query}`, { headers });
       if (!res.ok) return [];
       const data = await res.json();
       return data.tracks ?? [];
