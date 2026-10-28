@@ -4,7 +4,13 @@ import request from 'supertest';
 import sharp from 'sharp';
 import type { ResponsesEvent } from '@meta-sam/parser';
 import { createApp } from '../server/app';
-import { checkInput, decodeSelection, requestSam, type CheckedInput } from '../server/sam';
+import {
+  checkInput,
+  decodeSelection,
+  evaluateSamContinuityCheck,
+  requestSam,
+  type CheckedInput,
+} from '../server/sam';
 
 let body: { image: string; concept: string; sourceHash: string };
 afterEach(() => vi.unstubAllGlobals());
@@ -166,5 +172,78 @@ describe('SDK request contract with a stubbed HTTP transport; no live API', () =
     vi.stubGlobal('fetch', fetchStub);
     await expect(requestSam(input, 'test-key', new AbortController().signal)).rejects.toThrow();
     expect(fetchStub).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('Role 2: SAM 3.1 maskRef, neutral object selection, track storage & ambiguity handling', () => {
+  it('produces versioned maskRef and consistent / mismatch / uncertain evidence', async () => {
+    const decoded = await decodeSelection(events(wire), input, 3);
+    expect(decoded.maskRef).toBe('sam-3.1:button:0:v3');
+    expect(decoded.objects[0].maskRef).toBe('sam-3.1:button:0:v3');
+    expect(decoded.ambiguityStatus).toBe('consistent');
+
+    // Mismatch when observedValue differs from expectedValue
+    const mismatchCheck = evaluateSamContinuityCheck(decoded.objects, 'button', {
+      expectedValue: 'blue',
+      observedValue: 'red',
+    });
+    expect(mismatchCheck.status).toBe('mismatch');
+    expect(mismatchCheck.maskRef).toBe('sam-3.1:button:0:v3');
+
+    // Uncertain when 0 candidate masks exist
+    const zeroMatchCheck = evaluateSamContinuityCheck([], 'button');
+    expect(zeroMatchCheck.status).toBe('uncertain');
+    expect(zeroMatchCheck.isAmbiguous).toBe(true);
+
+    // Uncertain when multiple candidate objects have competing confidence
+    const competingObjects = [
+      { ...decoded.objects[0], objectId: '0', confidence: 0.91 },
+      { ...decoded.objects[0], objectId: '1', confidence: 0.88 },
+    ];
+    const multiCandidateCheck = evaluateSamContinuityCheck(competingObjects, 'button');
+    expect(multiCandidateCheck.status).toBe('uncertain');
+    expect(multiCandidateCheck.isAmbiguous).toBe(true);
+  });
+
+  it('stores versioned mask tracks via /api/segment/check and resolves ambiguity via /api/masks/disambiguate', async () => {
+    const app = createApp({ settings: () => ({ key: '', requestLimit: 10 }) });
+    const health = await request(app).get('/api/health');
+
+    // 1. Run a low-confidence check that flags "uncertain" ambiguity
+    const checkRes = await request(app)
+      .post('/api/segment/check')
+      .set('X-Anchorshot-Session', health.body.sessionToken)
+      .send({
+        ...body,
+        shotNumber: 4,
+        ruleRevision: 2,
+        confidence: 0.72,
+        expectedValue: 'emerald',
+        observedValue: 'emerald',
+      });
+
+    expect(checkRes.status).toBe(200);
+    expect(checkRes.body.maskRef).toBe('sam-3.1:cup:0:v2');
+    expect(checkRes.body.ambiguityStatus).toBe('uncertain');
+    expect(checkRes.body.track.status).toBe('uncertain');
+
+    // 2. Verify track is stored in GET /api/masks
+    const listRes = await request(app).get('/api/masks?concept=cup&shotNumber=4');
+    expect(listRes.status).toBe(200);
+    expect(listRes.body.tracks).toHaveLength(1);
+    expect(listRes.body.tracks[0].maskRef).toBe('sam-3.1:cup:0:v2');
+
+    // 3. Disambiguate via POST /api/masks/disambiguate
+    const resolveRes = await request(app)
+      .post('/api/masks/disambiguate')
+      .set('X-Anchorshot-Session', health.body.sessionToken)
+      .send({
+        maskRef: 'sam-3.1:cup:0:v2',
+        selectedObjectId: '0',
+        status: 'consistent',
+      });
+
+    expect(resolveRes.status).toBe(200);
+    expect(resolveRes.body.track.status).toBe('consistent');
   });
 });

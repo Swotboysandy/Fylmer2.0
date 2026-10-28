@@ -1,11 +1,27 @@
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import path from 'path';
-import {defineConfig} from 'vite';
+import { defineConfig, type Plugin } from 'vite';
+
+function anchorShotSamApiPlugin(): Plugin {
+  return {
+    name: 'anchorshot-sam-api',
+    async configureServer(server) {
+      const { createApp } = await import('./server/app');
+      const apiApp = createApp({
+        settings: () => ({
+          key: (process.env.META_API_KEY ?? process.env.VITE_META_AI_API_KEY ?? '').trim(),
+          requestLimit: Number(process.env.SAM_MAX_REQUESTS ?? 25),
+        }),
+      });
+      server.middlewares.use(apiApp);
+    },
+  };
+}
 
 export default defineConfig(() => {
   return {
-    plugins: [react(), tailwindcss()],
+    plugins: [react(), tailwindcss(), anchorShotSamApiPlugin()],
     resolve: {
       alias: {
         '@': path.resolve(__dirname, '.'),

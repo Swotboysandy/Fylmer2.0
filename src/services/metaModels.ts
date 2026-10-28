@@ -454,6 +454,47 @@ export class MetaModelClient {
       revisions: [...shot.revisions, newRevision],
     };
   }
+
+  /**
+   * Queries `/api/health` on the local Express + SAM 3.1 server to retrieve session token
+   * and live configuration status.
+   */
+  public async getSamBackendHealth(): Promise<{
+    configured: boolean;
+    model: string;
+    sessionToken: string;
+    requestsUsed: number;
+    requestLimit: number;
+    tracksStored?: number;
+  } | null> {
+    if (typeof fetch !== 'function') return null;
+    try {
+      const res = await fetch('/api/health');
+      if (!res.ok) return null;
+      return await res.json();
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Queries `/api/masks` to retrieve versioned `maskRef` cross-shot tracks stored on the server.
+   */
+  public async fetchStoredMaskTracks(concept?: string, shotNumber?: number) {
+    if (typeof fetch !== 'function') return [];
+    try {
+      const params = new URLSearchParams();
+      if (concept) params.set('concept', concept);
+      if (shotNumber !== undefined) params.set('shotNumber', String(shotNumber));
+      const query = params.toString() ? `?${params.toString()}` : '';
+      const res = await fetch(`/api/masks${query}`);
+      if (!res.ok) return [];
+      const data = await res.json();
+      return data.tracks ?? [];
+    } catch {
+      return [];
+    }
+  }
 }
 
 export const metaModelClient = new MetaModelClient();

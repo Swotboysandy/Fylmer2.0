@@ -1,7 +1,15 @@
 import { randomBytes } from 'node:crypto';
 import express, { type ErrorRequestHandler } from 'express';
-import { checkInput, requestSam, UserError, type CheckedInput } from './sam';
-import type { SegmentationResult } from '../src/types';
+import {
+  checkInput,
+  decodeOfflineSamSelection,
+  evaluateSamContinuityCheck,
+  MaskTrackStore,
+  requestSam,
+  UserError,
+  type CheckedInput,
+} from './sam';
+import type { ContinuityEvidenceStatus, SegmentationResult } from '../src/types';
 
 interface Settings {
   key: string;
@@ -15,8 +23,10 @@ interface Options {
 export function createApp(options: Options) {
   const app = express();
   const sessionToken = randomBytes(24).toString('hex');
+  const trackStore = new MaskTrackStore();
   let requestsUsed = 0;
   let active = false;
+
   app.disable('x-powered-by');
   app.use('/api', (req, res, next) => {
     res.setHeader('Cache-Control', 'no-store');
@@ -27,19 +37,30 @@ export function createApp(options: Options) {
       return res.status(403).json({ error: 'Open this app on its local address.' });
     next();
   });
+
   app.get('/api/health', (_req, res) => {
     const settings = options.settings();
     res.json({
       configured: Boolean(settings.key),
       model: 'sam-3.1',
+      models: ['sam-3.1', 'muse-spark-1.3', 'muse-voice-transcribe-1.0', 'muse-image-1.0'],
       sessionToken,
       requestsUsed,
       requestLimit: settings.requestLimit,
+      tracksStored: trackStore.listTracks().length,
     });
   });
+
   app.use('/api', express.json({ limit: '12mb' }));
+
+  const hasValidSession = (req: express.Request) => {
+    const token =
+      req.headers['x-framelock-session'] ?? req.headers['x-anchorshot-session'];
+    return token === sessionToken;
+  };
+
   app.post('/api/segment', async (req, res, next) => {
-    if (req.headers['x-framelock-session'] !== sessionToken)
+    if (!hasValidSession(req))
       return res.status(403).json({ error: 'Refresh the page before selecting an object.' });
     const settings = options.settings();
     if (!settings.key)
@@ -71,7 +92,129 @@ export function createApp(options: Options) {
       active = false;
     }
   });
+
+  /**
+   * Role 2 Deliverable Endpoint: `POST /api/segment/check`
+   * Produces versioned masks (`maskRef`), neutral object selection, mask/track storage,
+   * and `consistent` / `mismatch` / `uncertain` continuity evidence.
+   * Uses live `sam-3.1` when `META_API_KEY` is configured or `@meta-sam/parser` wire-stream
+   * fallback in local mode.
+   */
+  app.post('/api/segment/check', async (req, res, next) => {
+    if (!hasValidSession(req))
+      return res.status(403).json({ error: 'Refresh the page before running a continuity check.' });
+    const settings = options.settings();
+    const controller = new AbortController();
+    res.on('close', () => {
+      if (!res.writableEnded) controller.abort();
+    });
+    try {
+      const input = await checkInput(req.body);
+      if (controller.signal.aborted) return;
+
+      const shotNumber = Number(req.body?.shotNumber ?? 1);
+      const revision =
+        typeof req.body?.ruleRevision === 'number'
+          ? req.body.ruleRevision
+          : trackStore.nextRevision(shotNumber, input.concept);
+      const simulatedConfidence =
+        typeof req.body?.confidence === 'number' ? req.body.confidence : 0.984;
+
+      let segmentation: SegmentationResult;
+      if (settings.key && requestsUsed < settings.requestLimit) {
+        requestsUsed++;
+        segmentation = await (options.segment ?? requestSam)(
+          input,
+          settings.key,
+          controller.signal,
+        );
+      } else {
+        segmentation = await decodeOfflineSamSelection(input, revision, simulatedConfidence);
+      }
+
+      const check = evaluateSamContinuityCheck(segmentation.objects, input.concept, {
+        expectedValue: req.body?.expectedValue,
+        observedValue: req.body?.observedValue,
+        minConfidence: req.body?.minConfidence,
+      });
+
+      const primaryObj =
+        segmentation.objects.find((o) => o.objectId === check.selectedObjectId) ??
+        segmentation.objects[0];
+
+      const storedTrack =
+        primaryObj && check.maskRef
+          ? trackStore.recordTrack({
+              maskRef: check.maskRef,
+              concept: input.concept,
+              shotNumber,
+              revision,
+              objectId: primaryObj.objectId,
+              bounds: primaryObj.bounds,
+              confidence: check.confidence,
+              sourceHash: input.sourceHash,
+              status: check.status,
+              evidence: check.explanation,
+              createdAt: Date.now(),
+            })
+          : null;
+
+      if (!controller.signal.aborted) {
+        res.json({
+          ...segmentation,
+          maskRef: check.maskRef ?? undefined,
+          selectedObjectId: check.selectedObjectId,
+          ambiguityStatus: check.status,
+          evidence: check.explanation,
+          check,
+          track: storedTrack,
+        });
+      }
+    } catch (error) {
+      if (!controller.signal.aborted) next(error);
+    }
+  });
+
+  /**
+   * Role 2 Deliverable Endpoint: `GET /api/masks`
+   * Lists stored versioned masks (`maskRef`) and cross-shot tracks.
+   */
+  app.get('/api/masks', (req, res) => {
+    const concept = typeof req.query.concept === 'string' ? req.query.concept : undefined;
+    const shotNumber =
+      typeof req.query.shotNumber === 'string' ? Number(req.query.shotNumber) : undefined;
+    res.json({
+      tracks: trackStore.listTracks(concept, shotNumber),
+    });
+  });
+
+  /**
+   * Role 2 Deliverable Endpoint: `POST /api/masks/disambiguate`
+   * Resolves an `uncertain` SAM 3.1 detection by locking a chosen candidate `objectId`
+   * for a versioned `maskRef`.
+   */
+  app.post('/api/masks/disambiguate', (req, res) => {
+    if (!hasValidSession(req))
+      return res.status(403).json({ error: 'Refresh the page before disambiguating a mask.' });
+    const { maskRef, selectedObjectId, status } = req.body as {
+      maskRef?: string;
+      selectedObjectId?: string;
+      status?: ContinuityEvidenceStatus;
+    };
+    if (!maskRef || !selectedObjectId) {
+      return res.status(400).json({ error: 'Provide both maskRef and selectedObjectId.' });
+    }
+    const resolvedStatus: ContinuityEvidenceStatus =
+      status === 'mismatch' || status === 'uncertain' ? status : 'consistent';
+    const updated = trackStore.disambiguate(maskRef, String(selectedObjectId), resolvedStatus);
+    if (!updated) {
+      return res.status(404).json({ error: `Mask reference ${maskRef} was not found.` });
+    }
+    res.json({ track: updated });
+  });
+
   app.use('/api', (_req, res) => res.status(404).json({ error: 'Unknown API endpoint.' }));
+
   const errorHandler: ErrorRequestHandler = (error: unknown, _req, res, _next) => {
     if (error instanceof UserError) {
       res.status(error.status).json({ error: error.message });
