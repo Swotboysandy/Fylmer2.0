@@ -355,7 +355,7 @@ export const StoryboardStage: React.FC<StoryboardStageProps> = ({
                     src={displayedImageUrl}
                     alt={shot.spokenDescription}
                     referrerPolicy="no-referrer"
-                    className="w-full h-full object-cover"
+                    className="w-full h-full object-contain"
                   />
 
                   {isRepaired && (

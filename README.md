@@ -61,7 +61,7 @@ VITE_SAM3_MODEL="sam-3.1"
 2. **Configure environment variables:**
    Create a `.env` file (or configure secrets in the AI Studio Secrets panel) using the keys listed in `.env.example`.
 
-3. **Start the development server (runs on port 3000):**
+3. **Start the development server (runs locally on port 4317):**
    ```bash
    npm run dev
    ```
@@ -97,3 +97,7 @@ Speak via `[V]` or type into the **Direct Voice / Text Command** input:
 - `"Fix continuity mismatch in Shot 2 using SAM 3.1"`
 - `"Change continuity rule: cup color must be emerald"`
 - `"Narrate all shots and continuity status"`
+
+## Free local GPU generation
+
+See [Local AI setup and in-app testing](docs/LOCAL_AI_GENERATION.md). The shot inspector can generate actual images and short videos using the installed local models without hackathon credits. The original sample storyboard controls remain available.

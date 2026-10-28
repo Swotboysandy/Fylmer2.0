@@ -14,10 +14,11 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:rendering": "node --import tsx --test tests/maskIntegrity.test.ts tests/sceneTransitions.test.ts",
+    "test:local-ai": "node --import tsx --test tests/localAi.test.ts",
     "test:e2e": "playwright test",
     "test:live": "node --import tsx scripts/test_live_sam.ts",
     "export:evidence": "node --import tsx scripts/export_evidence_bundle.ts",
-    "check": "npm run typecheck && npm run test:rendering && npm test && npm run build"
+    "check": "npm run typecheck && npm run test:rendering && npm run test:local-ai && npm test && npm run build"
   },
   "engines": {
     "node": ">=22.12.0"

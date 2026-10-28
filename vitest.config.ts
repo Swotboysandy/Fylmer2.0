@@ -6,6 +6,7 @@ export default defineConfig({
       'tests/browser/**',
       'tests/maskIntegrity.test.ts',
       'tests/sceneTransitions.test.ts',
+      'tests/localAi.test.ts',
       'node_modules/**',
     ],
   },
