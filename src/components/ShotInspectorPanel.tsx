@@ -136,7 +136,7 @@ export const ShotInspectorPanel: React.FC<ShotInspectorPanelProps> = ({
               <CheckCircle2 className="w-5 h-5 text-[#10B981] shrink-0" aria-hidden="true" />
               <span>Continuity Rules Verified</span>
             </span>
-            <span className="text-xs font-mono text-[#34D399]">100% SYNC</span>
+            <span className="text-xs font-mono text-[#34D399]">FIXTURE RULES</span>
           </div>
         )}
       </div>
@@ -164,7 +164,7 @@ export const ShotInspectorPanel: React.FC<ShotInspectorPanelProps> = ({
             <div className="flex items-center justify-between">
               <span>TARGET: &ldquo;{activeShot.proposedFix?.targetObject || 'cup'}&rdquo;</span>
               <span className="text-[#34D399]">
-                IoU: {(currentMask.confidence * 100).toFixed(1)}%
+                Fixture mask / IoU not measured
               </span>
             </div>
             <div className="text-[#94A3B8]">
@@ -300,6 +300,11 @@ export const ShotInspectorPanel: React.FC<ShotInspectorPanelProps> = ({
                   </span>
                   <span className="text-xs font-mono text-[#94A3B8] tabular-nums">
                     {new Date(rev.timestamp).toLocaleTimeString()}
+                    {rev.pixelVerification && <span className="block">
+                      Mask check: {rev.pixelVerification.passed ? 'PASS' : 'FAIL'} /
+                      {' '}{rev.pixelVerification.changedOutside} outside pixels changed /
+                      {' '}{rev.pixelVerification.changedInside} selected pixels edited
+                    </span>}
                   </span>
                 </div>
                 {!isCurrent && (
@@ -322,7 +327,7 @@ export const ShotInspectorPanel: React.FC<ShotInspectorPanelProps> = ({
       <section aria-labelledby="model-telemetry-heading" className="flex flex-col gap-2">
         <h3 id="model-telemetry-heading" className="text-sm font-semibold text-[#E2E8F0] flex items-center gap-2">
           <Cpu className="w-4 h-4 text-[#38BDF8]" aria-hidden="true" />
-          <span>Meta AI Pipeline Log</span>
+          <span>Offline Fixture Pipeline Log</span>
         </h3>
         <div className="bg-[#16191E] border border-[#323A46] rounded p-2.5 max-h-36 overflow-y-auto flex flex-col gap-2 font-mono text-xs">
           {modelLogs.slice(0, 5).map((log) => (

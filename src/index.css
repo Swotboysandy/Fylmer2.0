@@ -8,7 +8,7 @@
   body {
     background-color: #121417;
     color: #FFFFFF;
-    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    font-family: 'Inter Variable', -apple-system, BlinkMacSystemFont, sans-serif;
     font-size: 16px;
     line-height: 1.6;
     letter-spacing: 0.01em;
@@ -19,12 +19,12 @@
   }
 
   h1, h2, h3, h4, .font-display {
-    font-family: 'Plus Jakarta Sans', 'Inter', sans-serif;
+    font-family: 'Plus Jakarta Sans Variable', 'Inter Variable', sans-serif;
     text-wrap: balance;
   }
 
   code, kbd, pre, .font-mono {
-    font-family: 'JetBrains Mono', monospace;
+    font-family: 'JetBrains Mono Variable', monospace;
     font-variant-numeric: tabular-nums;
   }
 

@@ -1,4 +1,7 @@
 import React from 'react';
+import { useReducedMotion } from 'motion/react';
+import { SceneTransition } from './SceneTransition';
+import { transitionAt } from '../services/sceneTransitions';
 import {
   AlertTriangle,
   CheckCircle2,
@@ -14,6 +17,9 @@ import { ContinuityRule, StoryboardShot } from '../types/framelock';
 
 interface StoryboardStageProps {
   shots: StoryboardShot[];
+  currentTimeSeconds: number;
+  transitionsEnabled: boolean;
+  onSetTransitionsEnabled: (enabled: boolean) => void;
   rules: ContinuityRule[];
   activeShotId: string | null;
   showSamMaskOverlay: boolean;
@@ -30,6 +36,9 @@ interface StoryboardStageProps {
 
 export const StoryboardStage: React.FC<StoryboardStageProps> = ({
   shots,
+  currentTimeSeconds,
+  transitionsEnabled,
+  onSetTransitionsEnabled,
   rules,
   activeShotId,
   showSamMaskOverlay,
@@ -43,7 +52,10 @@ export const StoryboardStage: React.FC<StoryboardStageProps> = ({
   onToggleSamMaskOverlay,
   onExportProjectJson,
 }) => {
-  const activeShot = shots.find((s) => s.id === activeShotId) || shots[0] || null;
+  const reducedMotion = useReducedMotion();
+  const transition = transitionAt(shots.map(shot => shot.durationSeconds), currentTimeSeconds, transitionsEnabled && !reducedMotion);
+  const activeShot = viewMode === 'animatic' ? shots[transition.index] : shots.find((s) => s.id === activeShotId) || shots[0] || null;
+  const nextShot = shots[transition.index + 1];
   const mismatchCount = shots.filter((s) => s.status === 'mismatch').length;
   const consistentCount = shots.filter((s) => s.status === 'consistent').length;
 
@@ -131,7 +143,7 @@ export const StoryboardStage: React.FC<StoryboardStageProps> = ({
             className="min-h-[42px] px-3.5 py-2 bg-[#16191E] border-2 border-[#4B5563] hover:border-[#38BDF8] text-white text-sm font-semibold rounded flex items-center gap-2 transition-colors whitespace-nowrap shrink-0"
           >
             <Download className="w-4 h-4 text-[#38BDF8]" aria-hidden="true" />
-            <span>Export JSON</span>
+            <span>Export local test bundle</span>
           </button>
         </div>
       </div>
@@ -158,13 +170,15 @@ export const StoryboardStage: React.FC<StoryboardStageProps> = ({
             </span>
           </div>
 
+          <label className="flex items-center gap-2 text-sm text-[#E2E8F0]">
+            <input type="checkbox" checked={transitionsEnabled} onChange={event => onSetTransitionsEnabled(event.target.checked)} />
+            Offline scene transitions (1s dissolve)
+            {reducedMotion && <span> / reduced motion: cuts</span>}
+          </label>
           <div className="relative aspect-video w-full bg-[#121417] border-2 border-[#323A46] rounded overflow-hidden">
-            <img
-              src={activeShot.currentImageUrl}
-              alt={activeShot.spokenDescription}
-              referrerPolicy="no-referrer"
-              className="w-full h-full object-cover"
-            />
+            <SceneTransition source={activeShot.currentImageUrl}
+              destination={nextShot?.currentImageUrl} mask={activeShot.proposedFix?.mask?.maskBase64}
+              progress={transition.progress} description={activeShot.spokenDescription} />
 
             {/* SAM 3.1 Segmentation Mask & Bounding Box Overlay */}
             {showSamMaskOverlay && activeShot.proposedFix?.mask && (

@@ -1,3 +1,4 @@
+import { useReducedMotion } from 'motion/react';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ContinuityRule,
@@ -16,6 +17,7 @@ import { ShotInspectorPanel } from './components/ShotInspectorPanel';
 import { KeyboardShortcutsModal } from './components/KeyboardShortcutsModal';
 
 export default function App() {
+  const reducedMotion = useReducedMotion();
   const initialPreset = DIRECTOR_PRESETS[0];
 
   const [projectState, setProjectState] = useState<ProjectState>({
@@ -34,6 +36,7 @@ export default function App() {
 
   const [activePresetId, setActivePresetId] = useState<string>(initialPreset.id);
   const [showSamMaskOverlay, setShowSamMaskOverlay] = useState<boolean>(true);
+  const [transitionsEnabled, setTransitionsEnabled] = useState(true);
   const [viewMode, setViewMode] = useState<'grid' | 'animatic'>('grid');
   const [currentTimeSeconds, setCurrentTimeSeconds] = useState<number>(0);
   const [isSpeaking, setIsSpeaking] = useState<boolean>(false);
@@ -578,6 +581,7 @@ export default function App() {
     setProjectState((prev) => {
       const nextPlaying = !prev.isPlayingAnimatic;
       if (nextPlaying) {
+        if (currentTimeSeconds >= totalDurationSeconds) setCurrentTimeSeconds(0);
         setViewMode('animatic');
         lastNarratedShotIdInAnimaticRef.current = null;
       } else {
@@ -591,22 +595,26 @@ export default function App() {
           : 'Animatic playback paused.',
       };
     });
-  }, []);
+  }, [currentTimeSeconds, totalDurationSeconds]);
 
   // Animatic Timeline Clock Effect
   useEffect(() => {
     if (!projectState.isPlayingAnimatic || projectState.shots.length === 0) return;
 
-    const interval = setInterval(() => {
+    let previous = performance.now();
+    let frame = 0;
+    const tick = (now: number) => {
+      const delta = (now - previous) / 1000;
+      previous = now;
       setCurrentTimeSeconds((prevTime) => {
-        const nextTime = prevTime + 0.1;
+        const nextTime = prevTime + delta;
         if (nextTime >= totalDurationSeconds) {
           setProjectState((p) => ({
             ...p,
             isPlayingAnimatic: false,
             statusAnnouncement: 'Animatic sequence playback completed.',
           }));
-          return 0;
+          return totalDurationSeconds;
         }
 
         // Determine which shot corresponds to `nextTime`
@@ -629,9 +637,10 @@ export default function App() {
 
         return nextTime;
       });
-    }, 100);
-
-    return () => clearInterval(interval);
+      frame = requestAnimationFrame(tick);
+    };
+    frame = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(frame);
   }, [projectState.isPlayingAnimatic, projectState.shots, totalDurationSeconds]);
 
   // Scrub timeline manually
@@ -643,7 +652,7 @@ export default function App() {
 
       let elapsed = 0;
       for (const shot of projectState.shots) {
-        if (clamped >= elapsed && clamped <= elapsed + shot.durationSeconds) {
+        if (clamped >= elapsed && (clamped < elapsed + shot.durationSeconds || shot === projectState.shots[projectState.shots.length - 1])) {
           if (projectState.activeShotId !== shot.id) {
             setProjectState((prev) => ({
               ...prev,
@@ -661,6 +670,8 @@ export default function App() {
   // Export Project JSON
   const handleExportProjectJson = useCallback(() => {
     const exportPayload = {
+      mode: 'offline-fixture',
+      transitionsEnabled: transitionsEnabled && !reducedMotion,
       projectId: projectState.projectId,
       title: projectState.title,
       exportedAt: new Date().toISOString(),
@@ -674,6 +685,9 @@ export default function App() {
         spokenDescription: s.spokenDescription,
         status: s.status,
         revisionsCount: s.revisions.length,
+        currentImageUrl: s.currentImageUrl,
+        mask: s.proposedFix?.mask,
+        revisions: s.revisions,
       })),
     };
     const blob = new Blob([JSON.stringify(exportPayload, null, 2)], {
@@ -686,7 +700,7 @@ export default function App() {
     a.click();
     URL.revokeObjectURL(url);
     announceStatus('Exported Framelock storyboard and continuity report JSON.', true);
-  }, [projectState, announceStatus]);
+  }, [projectState, announceStatus, transitionsEnabled, reducedMotion]);
 
   // Global Keyboard Navigation (WCAG 2.2 AAA Full Keyboard Control)
   useEffect(() => {
@@ -901,7 +915,11 @@ export default function App() {
 
         {/* Center Stage: Storyboard Frames Grid / Animatic Monitor + Audio Scrubbing Timeline */}
         <div className="flex-1 min-w-0 flex flex-col gap-6">
+          <p className="text-xs font-mono text-[#94A3B8]">OFFLINE FIXTURES / No model API calls / Scores measure local checks, not AI quality</p>
           <StoryboardStage
+            currentTimeSeconds={currentTimeSeconds}
+            transitionsEnabled={transitionsEnabled}
+            onSetTransitionsEnabled={setTransitionsEnabled}
             shots={projectState.shots}
             rules={projectState.rules}
             activeShotId={projectState.activeShotId}
