@@ -55,7 +55,9 @@ export function createLocalAi(root: string, launch = spawn) {
     if (!ID.test(id) || !jobs.has(id) || !assets.has(file) || jobs.get(id)?.status !== 'completed') {
       res.status(404).end(); return;
     }
-    res.sendFile(path.join(output, id, file), {dotfiles: 'allow'});
+    res.sendFile(path.resolve(output, id, file), {dotfiles: 'allow'}, (err) => {
+      if (err && !res.headersSent) res.status(404).end();
+    });
   });
   function stop(reason: string) {
     if (!active) return;
