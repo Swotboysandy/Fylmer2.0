@@ -992,7 +992,7 @@ export default function App() {
           </p>
         </div>
 
-        <div className="flex items-center gap-3 text-xs font-mono text-[#E2E8F0] shrink-0">
+        <div className="flex flex-wrap items-center gap-3 text-xs font-mono text-[#E2E8F0]">
           <span>KEYS:</span>
           <kbd className="px-1.5 py-0.5 bg-[#0F172A] text-[#38BDF8] rounded">[V] Voice</kbd>
           <kbd className="px-1.5 py-0.5 bg-[#0F172A] text-[#38BDF8] rounded">[N] Narrate</kbd>

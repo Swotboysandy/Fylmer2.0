@@ -1,0 +1,79 @@
+{
+  "date": "2026-10-29",
+  "branch": "rendering-checkpoints",
+  "checks": {
+    "offlineTests": 43,
+    "browserTests": 3,
+    "typecheck": "passed",
+    "productionBuild": "passed"
+  },
+  "compositor": {
+    "mode": "local-composite",
+    "backgrounds": "local SD1.5",
+    "mask": "authored cup and shadow; not SAM",
+    "framesChecked": 289,
+    "fps": 24,
+    "durationSeconds": 12,
+    "reducedMotion": false,
+    "protectedPixels": 14802,
+    "changedProtectedPixels": 0,
+    "maxChannelDelta": 0,
+    "changedProtectedPixelsAcrossFrames": 0,
+    "renderP95Ms": 7.6,
+    "passed": true,
+    "scope": "Uncompressed compositor frames; lossy WebM encoding is not pixel-exact.",
+    "paidApiCalls": 0
+  },
+  "export": {
+    "decodedVideo": {
+      "programs": [],
+      "stream_groups": [],
+      "streams": [
+        {
+          "codec_name": "vp9",
+          "width": 800,
+          "height": 450,
+          "nb_read_frames": "279"
+        }
+      ],
+      "format": {
+        "duration": "11.986204"
+      }
+    },
+    "cupEncodingError": [
+      {
+        "time": 0,
+        "protectedRegionMAE": 2.618,
+        "protectedRegionP99ChannelError": 23.0
+      },
+      {
+        "time": 3,
+        "protectedRegionMAE": 2.214,
+        "protectedRegionP99ChannelError": 22.0
+      },
+      {
+        "time": 6,
+        "protectedRegionMAE": 2.392,
+        "protectedRegionP99ChannelError": 25.0
+      },
+      {
+        "time": 9,
+        "protectedRegionMAE": 2.475,
+        "protectedRegionP99ChannelError": 28.0
+      },
+      {
+        "time": 11.8,
+        "protectedRegionMAE": 2.464,
+        "protectedRegionP99ChannelError": 28.0
+      }
+    ],
+    "maskOverlayExcludedFromPNG": true,
+    "scope": "Decoded lossy WebM compared with uncompressed cup reference. Not exact zero drift."
+  },
+  "browser": {
+    "errors": [],
+    "posts": [],
+    "playPause": true,
+    "exportCancel": true
+  }
+}

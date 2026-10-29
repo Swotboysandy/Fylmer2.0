@@ -1,3 +1,4 @@
+import {DreamTransitionPanel} from './DreamTransitionPanel';
 import {isLocalImage} from '../services/localGeneration';
 import React from 'react';
 import { useReducedMotion } from 'motion/react';
@@ -79,6 +80,7 @@ export const StoryboardStage: React.FC<StoryboardStageProps> = ({
 
   return (
     <div className="flex-1 min-w-0 flex flex-col gap-5">
+      <DreamTransitionPanel />
       {/* Stage Workspace Toolbar */}
       <div className="bg-[#1E232B] border-2 border-[#323A46] rounded-lg p-4 flex flex-wrap items-center justify-between gap-4">
         <div className="flex flex-wrap items-center gap-3">

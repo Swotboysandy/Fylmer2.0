@@ -1,0 +1,44 @@
+{
+  "backgrounds": [
+    {
+      "prompt": "cinematic photograph, empty vintage kitchen interior, cream ceramic tile floor, wooden cupboards on left, large arched open doorway centered in back wall, warm morning light, wide angle view at table height, no people, no cups, no mugs, no text, calm dreamlike atmosphere",
+      "seed": 124,
+      "baseModel": {
+        "repository": "stable-diffusion-v1-5/stable-diffusion-v1-5",
+        "revision": "451f4fe16113bff5a5d2269ed5ad43b0592e9a14"
+      },
+      "network": "disabled: local_files_only + HF offline",
+      "gpu": "NVIDIA GeForce RTX 3050 Laptop GPU",
+      "inferenceSeconds": 22.472,
+      "cudaPeakAllocatedMiB": 1201.09,
+      "weightLoader": "safetensors 0.8 pread",
+      "denoiserForwardDevices": [
+        "cuda:0"
+      ],
+      "paidApiCalls": 0,
+      "asset": "/dream/kitchen.png",
+      "sha256": "df230fd11aef724f177633892dc6579d41c3528044dc238c43493c2983565765"
+    },
+    {
+      "prompt": "cinematic photograph of a vast calm turquoise ocean, low viewpoint just above water, gentle long waves, distant horizon at center, soft golden morning sky, luminous clouds, wide angle, no people, no boats, no buildings, no cups, dreamlike atmosphere",
+      "seed": 225,
+      "baseModel": {
+        "repository": "stable-diffusion-v1-5/stable-diffusion-v1-5",
+        "revision": "451f4fe16113bff5a5d2269ed5ad43b0592e9a14"
+      },
+      "network": "disabled: local_files_only + HF offline",
+      "gpu": "NVIDIA GeForce RTX 3050 Laptop GPU",
+      "inferenceSeconds": 23.539,
+      "cudaPeakAllocatedMiB": 1201.09,
+      "weightLoader": "safetensors 0.8 pread",
+      "denoiserForwardDevices": [
+        "cuda:0"
+      ],
+      "paidApiCalls": 0,
+      "asset": "/dream/ocean.png",
+      "sha256": "2bd7ec20d699f054ab88212552f17af2473b4965c22fcfc6258d4f70ead5920f"
+    }
+  ],
+  "cup": "Authored canvas illustration and opaque protected footprint, including shadow. Not SAM output.",
+  "transition": "Deterministic local ripple and expanding reveal, not model-generated video."
+}

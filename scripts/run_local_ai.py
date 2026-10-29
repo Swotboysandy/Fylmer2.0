@@ -29,7 +29,9 @@ def main():
     # Use the tested per-pipeline SafeTensors backend in this isolated worker.
     # Set it before Diffusers/Transformers import and bind their safe_open references.
     import sys
-    backend = "pread" if sys.argv[1] == "video" else "mmap"
+    backend = os.environ.get("ANCHORSHOT_WEIGHT_LOADER") or ("pread" if sys.argv[1] == "video" else "mmap")
+    if backend not in {"pread", "mmap"}:
+        raise ValueError("Unsupported weight loader")
     original_reader = safetensors.safe_open
     def safe_reader(*args, **kwargs):
         kwargs["backend"] = backend

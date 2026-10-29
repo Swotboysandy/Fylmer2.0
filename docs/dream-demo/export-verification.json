@@ -1,0 +1,46 @@
+{
+  "decodedVideo": {
+    "programs": [],
+    "stream_groups": [],
+    "streams": [
+      {
+        "codec_name": "vp9",
+        "width": 800,
+        "height": 450,
+        "nb_read_frames": "279"
+      }
+    ],
+    "format": {
+      "duration": "11.986204"
+    }
+  },
+  "cupEncodingError": [
+    {
+      "time": 0,
+      "protectedRegionMAE": 2.618,
+      "protectedRegionP99ChannelError": 23.0
+    },
+    {
+      "time": 3,
+      "protectedRegionMAE": 2.214,
+      "protectedRegionP99ChannelError": 22.0
+    },
+    {
+      "time": 6,
+      "protectedRegionMAE": 2.392,
+      "protectedRegionP99ChannelError": 25.0
+    },
+    {
+      "time": 9,
+      "protectedRegionMAE": 2.475,
+      "protectedRegionP99ChannelError": 28.0
+    },
+    {
+      "time": 11.8,
+      "protectedRegionMAE": 2.464,
+      "protectedRegionP99ChannelError": 28.0
+    }
+  ],
+  "maskOverlayExcludedFromPNG": true,
+  "scope": "Decoded lossy WebM compared with uncompressed cup reference. Not exact zero drift."
+}

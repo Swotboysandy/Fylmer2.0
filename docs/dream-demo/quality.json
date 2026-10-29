@@ -1,0 +1,17 @@
+{
+  "mode": "local-composite",
+  "backgrounds": "local SD1.5",
+  "mask": "authored cup and shadow; not SAM",
+  "framesChecked": 289,
+  "fps": 24,
+  "durationSeconds": 12,
+  "reducedMotion": false,
+  "protectedPixels": 14802,
+  "changedProtectedPixels": 0,
+  "maxChannelDelta": 0,
+  "changedProtectedPixelsAcrossFrames": 0,
+  "renderP95Ms": 7.6,
+  "passed": true,
+  "scope": "Uncompressed compositor frames; lossy WebM encoding is not pixel-exact.",
+  "paidApiCalls": 0
+}
