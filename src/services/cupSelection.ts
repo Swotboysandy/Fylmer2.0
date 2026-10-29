@@ -78,18 +78,28 @@ export function unpackRasterMask(
   targetHeight: number,
 ): Uint8Array {
   const full = new Uint8Array(targetWidth * targetHeight);
-  const left = Math.max(0, Math.min(targetWidth, bounds.left));
-  const right = Math.max(left, Math.min(targetWidth, bounds.right));
-  const top = Math.max(0, Math.min(targetHeight, bounds.top));
-  const bottom = Math.max(top, Math.min(targetHeight, bounds.bottom));
+  if (
+    !bounds ||
+    !Number.isFinite(rw) ||
+    !Number.isFinite(rh) ||
+    rw <= 0 ||
+    rh <= 0 ||
+    raster.length < rw * rh
+  ) {
+    return full;
+  }
+  const left = Math.max(0, Math.min(targetWidth, Math.floor(bounds.left || 0)));
+  const right = Math.max(left, Math.min(targetWidth, Math.floor(bounds.right || 0)));
+  const top = Math.max(0, Math.min(targetHeight, Math.floor(bounds.top || 0)));
+  const bottom = Math.max(top, Math.min(targetHeight, Math.floor(bounds.bottom || 0)));
   const bw = right - left;
   const bh = bottom - top;
-  if (bw <= 0 || bh <= 0 || rw <= 0 || rh <= 0) return full;
+  if (bw <= 0 || bh <= 0) return full;
   for (let y = top; y < bottom; y++) {
+    const my = Math.min(rh - 1, Math.floor(((y - top) * rh) / bh));
     for (let x = left; x < right; x++) {
-      const mx = Math.floor(((x - left) * rw) / bw);
-      const my = Math.floor(((y - top) * rh) / bh);
-      full[y * targetWidth + x] = raster[my * rw + mx];
+      const mx = Math.min(rw - 1, Math.floor(((x - left) * rw) / bw));
+      full[y * targetWidth + x] = raster[my * rw + mx] ?? 0;
     }
   }
   return full;
@@ -138,7 +148,15 @@ export async function requestSamCupCutout(
           if (res.ok) {
             const data = await res.json();
             const primary = data.objects?.find((o: any) => o.objectId === data.selectedObjectId) ?? data.objects?.[0];
-            if (primary && primary.rasterBase64) {
+            if (
+              primary &&
+              primary.bounds &&
+              Number.isFinite(primary.rasterWidth) &&
+              Number.isFinite(primary.rasterHeight) &&
+              primary.rasterWidth > 0 &&
+              primary.rasterHeight > 0 &&
+              typeof primary.rasterBase64 === 'string'
+            ) {
               const rBin = atob(primary.rasterBase64);
               const raster = new Uint8Array(rBin.length);
               for (let i = 0; i < rBin.length; i++) raster[i] = rBin.charCodeAt(i);
@@ -154,7 +172,7 @@ export async function requestSamCupCutout(
                 return {
                   mask,
                   provenance: data.provenance || 'live-sam-3.1',
-                  confidence: primary.confidence ?? 0.95,
+                  confidence: typeof primary.confidence === 'number' && Number.isFinite(primary.confidence) ? primary.confidence : 0.95,
                   maskRef: data.maskRef,
                 };
               }
@@ -180,7 +198,7 @@ export async function requestSamCupCutout(
   return {
     mask,
     provenance: 'offline-fixture',
-    confidence: 0.984,
+    confidence: 0.55,
     maskRef: `sam-3.1:${concept}:0:offline`,
   };
 }

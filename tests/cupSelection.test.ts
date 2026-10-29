@@ -51,6 +51,18 @@ describe('photo cup mask',()=>{
   const fallback = await requestSamCupCutout(photo, 'cup');
   expect(fallback.mask.length).toBe(400);
   expect(fallback.mask.some(Boolean)).toBe(true);
-  expect(fallback.provenance).toBeTruthy();
+  expect(fallback.provenance).toBe('offline-fixture');
+  expect(fallback.confidence).toBe(0.55);
+
+  // Guards against malformed or short rasters at trust boundary
+  expect(unpackRasterMask(null as any, 2, 2, raster, 10, 10).length).toBe(100);
+  expect(unpackRasterMask({ left: 0, top: 0, right: 10, bottom: 10 }, 2, 2, new Uint8Array(2), 10, 10).some(Boolean)).toBe(false);
+
+  // Verifies live SAM raster base64 unpacking and bounds mapping
+  const fakeBinary = new Uint8Array([1, 1, 1, 1]);
+  const simulatedMask = unpackRasterMask({ left: 4, top: 4, right: 8, bottom: 8 }, 2, 2, fakeBinary, 20, 20);
+  expect(simulatedMask.some(Boolean)).toBe(true);
+  expect(simulatedMask[4 * 20 + 4]).toBe(1);
+  expect(simulatedMask[0]).toBe(0);
  });
 });
