@@ -15,9 +15,11 @@ test('local dream preserves cup, scrubs, exports and cancels without model calls
   await mkdir('.artifacts/dream-tests',{recursive:true});
   const mask=await page.evaluate(async()=>{
     const modulePath='/src/services/dreamTransition.ts';
-    const m=await import(/* @vite-ignore */ modulePath);return Array.from((await m.loadDreamAssets()).mask) as number[];
+    const m=await import(/* @vite-ignore */ modulePath);const bytes:Uint8Array=(await m.loadDreamAssets()).mask;
+    let binary='';for(let i=0;i<bytes.length;i+=8192)binary+=String.fromCharCode(...bytes.subarray(i,i+8192));
+    return btoa(binary);
   });
-  await writeFile('.artifacts/dream-tests/mask.bin',Buffer.from(mask));
+  await writeFile('.artifacts/dream-tests/mask.bin',Buffer.from(mask,'base64'));
   const report=page.waitForEvent('download');await study.getByRole('button',{name:'Save quality report'}).click();
   await (await report).saveAs('.artifacts/dream-tests/quality.json');
   for(const [name,file] of [['Kitchen','kitchen'],['World changing','midpoint'],['Ocean','ocean']]) {

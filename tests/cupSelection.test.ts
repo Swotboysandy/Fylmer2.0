@@ -1,4 +1,4 @@
-import {describe,it,expect} from 'vitest';
+import {describe,it,expect,vi} from 'vitest';
 import {brushMask,polygonMask,applyCupSelection,unpackRasterMask,requestSamCupCutout} from '../src/services/cupSelection';
 import {DREAM,renderDreamFrame,measureAnchor,type DreamAssets} from '../src/services/dreamTransition';
 const photo={width:20,height:20,data:new Uint8ClampedArray(20*20*4).fill(255)};
@@ -52,7 +52,7 @@ describe('photo cup mask',()=>{
   expect(fallback.mask.length).toBe(400);
   expect(fallback.mask.some(Boolean)).toBe(true);
   expect(fallback.provenance).toBe('offline-fixture');
-  expect(fallback.confidence).toBe(0.55);
+  expect(fallback.confidence).toBe(0);
 
   // Guards against malformed or short rasters at trust boundary
   expect(unpackRasterMask(null as any, 2, 2, raster, 10, 10).length).toBe(100);
@@ -65,4 +65,17 @@ describe('photo cup mask',()=>{
   expect(simulatedMask[4 * 20 + 4]).toBe(1);
   expect(simulatedMask[0]).toBe(0);
  });
+});
+
+it('offline mode performs no fetch even when a key might be configured',async()=>{
+ const fetch=vi.spyOn(globalThis,'fetch');
+ await requestSamCupCutout(photo);
+ expect(fetch).not.toHaveBeenCalled();fetch.mockRestore();
+});
+it('rejects fractional dimensions, nonbinary rasters and nonfinite bounds',()=>{
+ for(const [rw,rh,raster,bounds] of [
+ [1.5,2,new Uint8Array(3),{left:0,top:0,right:4,bottom:4}],
+ [2,2,new Uint8Array([1,255,0,1]),{left:0,top:0,right:4,bottom:4}],
+ [2,2,new Uint8Array(4).fill(1),{left:0,top:0,right:Infinity,bottom:4}],
+ ] as const)expect(unpackRasterMask(bounds,rw,rh,raster,10,10).some(Boolean)).toBe(false);
 });

@@ -80,11 +80,13 @@ export function unpackRasterMask(
   const full = new Uint8Array(targetWidth * targetHeight);
   if (
     !bounds ||
-    !Number.isFinite(rw) ||
-    !Number.isFinite(rh) ||
+    !Number.isInteger(rw) ||
+    !Number.isInteger(rh) ||
     rw <= 0 ||
     rh <= 0 ||
-    raster.length < rw * rh
+    raster.length !== rw * rh ||
+    !Object.values(bounds).every(Number.isFinite) ||
+    raster.some(v => v !== 0 && v !== 1)
   ) {
     return full;
   }
@@ -108,9 +110,10 @@ export function unpackRasterMask(
 export async function requestSamCupCutout(
   photo: Pixels,
   concept = 'cup',
+  options: {allowLive?: boolean; signal?: AbortSignal} = {},
 ): Promise<{ mask: Uint8Array; provenance: string; confidence: number; maskRef?: string }> {
   try {
-    if (typeof document !== 'undefined') {
+    if (options.allowLive && typeof document !== 'undefined') {
       const canvas = document.createElement('canvas');
       canvas.width = photo.width;
       canvas.height = photo.height;
@@ -128,12 +131,13 @@ export async function requestSamCupCutout(
           const digest = await crypto.subtle.digest('SHA-256', bytes);
           const hash = Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, '0')).join('');
 
-          const healthRes = await fetch('/api/health');
+          const healthRes = await fetch('/api/health', {signal: options.signal ?? AbortSignal.timeout(30000)});
           const health = healthRes.ok ? await healthRes.json() : null;
           const token = health?.sessionToken || '';
 
           const res = await fetch('/api/segment/check', {
             method: 'POST',
+            signal: options.signal ?? AbortSignal.timeout(30000),
             headers: {
               'Content-Type': 'application/json',
               'X-Framelock-Session': token,
@@ -171,8 +175,8 @@ export async function requestSamCupCutout(
               if (mask.some(Boolean)) {
                 return {
                   mask,
-                  provenance: data.provenance || 'live-sam-3.1',
-                  confidence: typeof primary.confidence === 'number' && Number.isFinite(primary.confidence) ? primary.confidence : 0.95,
+                  provenance: data.provenance === 'live-sam-3.1' ? 'live-sam-3.1' : 'offline-fixture',
+                  confidence: typeof primary.confidence === 'number' && Number.isFinite(primary.confidence) ? Math.max(0, Math.min(1, primary.confidence)) : 0,
                   maskRef: data.maskRef,
                 };
               }
@@ -181,9 +185,10 @@ export async function requestSamCupCutout(
         }
       }
     }
-  } catch {
-    // Graceful offline fallback
+  } catch (error) {
+    if (options.allowLive) throw error;
   }
+  if (options.allowLive) throw new Error('SAM returned no valid mask. Your current selection was preserved.');
 
   const mask = new Uint8Array(photo.width * photo.height);
   const cx = photo.width * 0.5, cy = photo.height * 0.5;
@@ -198,7 +203,7 @@ export async function requestSamCupCutout(
   return {
     mask,
     provenance: 'offline-fixture',
-    confidence: 0.55,
+    confidence: 0,
     maskRef: `sam-3.1:${concept}:0:offline`,
   };
 }

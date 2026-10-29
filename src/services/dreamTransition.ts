@@ -94,7 +94,7 @@ export async function verifyDream(a: DreamAssets, reduced = false, signal?: Abor
     if (i%12===0) await new Promise(r=>setTimeout(r,0));
   }
   timings.sort((a,b)=>a-b);
-  return {mode:'local-composite',backgrounds:'local SD1.5',mask:a.selectionInfo ? 'user-approved photo mask; local manual selection; not SAM' : 'authored cup and shadow; not SAM',
+  return {mode:'local-composite',backgrounds:'local SD1.5',mask:a.selectionInfo ? (a.selectionInfo.source === 'sam-3.1-photo' ? 'user-approved SAM photo mask' : 'user-approved photo mask; local manual selection; not SAM') : 'authored cup and shadow; not SAM',
     selection:a.selectionInfo || null,
     framesChecked:count, fps:DREAM.fps, durationSeconds:DREAM.duration, reducedMotion:reduced,
     ...measureAnchor(a,frame), changedProtectedPixelsAcrossFrames:drift, maxChannelDelta:maxDelta,
