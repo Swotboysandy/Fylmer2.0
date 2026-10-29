@@ -16,6 +16,7 @@
     "test:rendering": "node --import tsx --test tests/maskIntegrity.test.ts tests/sceneTransitions.test.ts",
     "test:e2e": "playwright test",
     "test:live": "node --import tsx scripts/test_live_sam.ts",
+    "test:ui": "node --import tsx scripts/run_ui_walkthrough.ts",
     "export:evidence": "node --import tsx scripts/export_evidence_bundle.ts",
     "check": "npm run typecheck && npm run test:rendering && npm run test:local-ai && npm test && npm run build",
     "test:local-ai": "node --import tsx --test tests/localAi.test.ts"
