@@ -83,7 +83,16 @@ export function DreamTransitionPanel() {
         <div className="flex flex-wrap gap-2">
           <button type="button" className={button} disabled={Boolean(busy)||editing} onClick={()=>{setEditing(true);setPlaying(false);setReport(null);}}>{selection?'Edit cup mask':'Select real cup'}</button>
           {selection && <button type="button" className={button} disabled={Boolean(busy)||editing} onClick={()=>{setSelection(null);setAssets(original.current);setReport(null);seek(0);}}>Restore illustrated cup</button>}
-          {selection && <span className="text-sm text-[#CBD5E1]">Approved photo mask · revision {selection.revision}</span>}
+          {selection && (
+            <span className="text-sm text-[#CBD5E1] inline-flex items-center gap-2">
+              <span>{selection.source === 'sam-3.1-photo' ? '✨ SAM 3.1 cutout' : 'Approved photo mask'} · revision {selection.revision}</span>
+              {selection.provenance && (
+                <span className="text-xs px-2 py-0.5 rounded bg-[#16191E] border border-[#38BDF8]/60 text-[#38BDF8]">
+                  {selection.provenance}
+                </span>
+              )}
+            </span>
+          )}
         </div>
         {editing && <CupMaskEditor initial={selection} onCancel={()=>setEditing(false)} onApply={s=>{
           const next=applyCupSelection(original.current!,s);setSelection(s);setAssets(next);setReport(null);setOverlay(false);setEditing(false);seek(0);

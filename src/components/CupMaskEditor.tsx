@@ -1,5 +1,5 @@
 import {useEffect,useRef,useState} from 'react';
-import {brushMask,decodeCupPhoto,polygonMask,type CupSelection,type Point} from '../services/cupSelection';
+import {brushMask,decodeCupPhoto,polygonMask,requestSamCupCutout,type CupSelection,type Point} from '../services/cupSelection';
 import type {Pixels} from '../services/dreamTransition';
 const button='min-h-[40px] px-3 py-2 border border-[#4B5563] rounded bg-[#16191E] text-sm text-white disabled:opacity-40';
 export function CupMaskEditor({initial,onApply,onCancel}:{initial:CupSelection|null;onApply:(s:CupSelection)=>void;onCancel:()=>void}) {
@@ -8,6 +8,10 @@ export function CupMaskEditor({initial,onApply,onCancel}:{initial:CupSelection|n
   const [tool,setTool]=useState<'polygon'|'add'|'erase'>('polygon'),[radius,setRadius]=useState(12);
   const [history,setHistory]=useState<Uint8Array[]>([]),[error,setError]=useState(''),[loading,setLoading]=useState(false);
   const [cursor,setCursor]=useState<Point>({x:200,y:150});
+  const [samLoading,setSamLoading]=useState(false);
+  const [samInfo,setSamInfo]=useState<{provenance:string;confidence:number;maskRef?:string}|null>(
+    initial?.source==='sam-3.1-photo'?{provenance:initial.provenance||'live-sam-3.1',confidence:initial.confidence||0.95,maskRef:initial.maskRef}:null
+  );
   const canvas=useRef<HTMLCanvasElement>(null),preview=useRef<HTMLCanvasElement>(null);
   const maskRef=useRef(mask),stroke=useRef<Point|null>(null),request=useRef(0);
   useEffect(()=>()=>{request.current++;},[]);
@@ -16,11 +20,24 @@ export function CupMaskEditor({initial,onApply,onCancel}:{initial:CupSelection|n
   const load=async(blob:Blob,label:string)=>{
     const id=++request.current;setLoading(true);setError('');
     try{const decoded=await decodeCupPhoto(blob);if(request.current!==id)return;
-      setPhoto(decoded);setName(label);update(new Uint8Array(decoded.width*decoded.height));setPoints([]);setHistory([]);setTool('polygon');
+      setPhoto(decoded);setName(label);update(new Uint8Array(decoded.width*decoded.height));setPoints([]);setHistory([]);setTool('polygon');setSamInfo(null);
     }catch(e){if(request.current===id)setError(e instanceof Error?e.message:'Image could not be decoded.');}
     finally{if(request.current===id)setLoading(false);}
   };
   const sample=async()=>{const id=++request.current;setLoading(true);setError('');try{const response=await fetch('/dream/real-cup.png');if(!response.ok)throw new Error('Sample photo unavailable.');const blob=await response.blob();if(request.current===id)await load(blob,'CC0 coffee photograph');}catch(e){if(request.current===id){setError(String(e));setLoading(false);}}};
+  const handleSamCutout=async()=>{
+    if(!photo)return;
+    setSamLoading(true);setError('');
+    try {
+      const res=await requestSamCupCutout(photo,'cup');
+      checkpoint();update(res.mask);setPoints([]);setTool('add');
+      setSamInfo({provenance:res.provenance,confidence:res.confidence,maskRef:res.maskRef});
+    } catch(e) {
+      setError(e instanceof Error?e.message:'SAM 3.1 cutout failed.');
+    } finally {
+      setSamLoading(false);
+    }
+  };
   useEffect(()=>{
     if(!photo||!canvas.current||!preview.current)return;
     const ctx=canvas.current.getContext('2d')!,image=ctx.createImageData(photo.width,photo.height);image.data.set(photo.data);
@@ -47,13 +64,24 @@ export function CupMaskEditor({initial,onApply,onCancel}:{initial:CupSelection|n
         <button type="button" className={button} onClick={()=>void sample()}>Use real cup sample</button>
       </div>
       {photo && <>
-        <div className="flex flex-wrap gap-2" aria-label="Mask tools">
+        <div className="flex flex-wrap items-center gap-2" aria-label="Mask tools">
           {(['polygon','add','erase'] as const).map(t=><button type="button" key={t} className={button} aria-pressed={tool===t} onClick={()=>{setTool(t);setPoints([]);}}>{t==='polygon'?'Trace outline':t==='add'?'Add brush':'Erase brush'}</button>)}
           <button type="button" className={button} disabled={points.length<3} onClick={finish}>Close outline</button>
           <button type="button" className={button} disabled={!history.length&&!points.length} onClick={()=>{if(points.length){setPoints(p=>p.slice(0,-1));return;}update(history[history.length-1]);setHistory(h=>h.slice(0,-1));}}>Undo mask edit</button>
           <button type="button" className={button} disabled={!count} onClick={()=>{checkpoint();update(new Uint8Array(mask.length));setPoints([]);}}>Clear mask</button>
+          <button type="button" className={`${button} border-[#38BDF8] text-[#38BDF8] hover:bg-[#38BDF8]/10 flex items-center gap-1.5`} disabled={samLoading||loading} onClick={()=>void handleSamCutout()}>
+            {samLoading?'Segmenting with SAM 3.1…':'✨ SAM 3.1 Smart Cutout'}
+          </button>
         </div>
-        {name==='CC0 coffee photograph' && <button type="button" className={button} onClick={()=>{checkpoint();update(polygonMask(photo.width,photo.height,[{x:174,y:108},{x:186,y:65},{x:217,y:34},{x:267,y:18},{x:322,y:21},{x:366,y:43},{x:397,y:76},{x:411,y:119},{x:401,y:168},{x:380,y:215},{x:348,y:258},{x:285,y:283},{x:248,y:279},{x:229,y:305},{x:209,y:310},{x:195,y:289},{x:198,y:260},{x:214,y:234},{x:193,y:201},{x:180,y:158}]));setPoints([]);setTool('erase');}}>Start rough sample outline</button>}
+        <div className="flex flex-wrap items-center gap-3">
+          {name==='CC0 coffee photograph' && <button type="button" className={button} onClick={()=>{checkpoint();update(polygonMask(photo.width,photo.height,[{x:174,y:108},{x:186,y:65},{x:217,y:34},{x:267,y:18},{x:322,y:21},{x:366,y:43},{x:397,y:76},{x:411,y:119},{x:401,y:168},{x:380,y:215},{x:348,y:258},{x:285,y:283},{x:248,y:279},{x:229,y:305},{x:209,y:310},{x:195,y:289},{x:198,y:260},{x:214,y:234},{x:193,y:201},{x:180,y:158}]));setPoints([]);setTool('erase');}}>Start rough sample outline</button>}
+          {samInfo && (
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded text-xs bg-[#0F172A] border border-[#38BDF8]/60 text-[#38BDF8]">
+              <span className="w-1.5 h-1.5 rounded-full bg-[#38BDF8] animate-pulse" />
+              SAM 3.1 Cutout ({samInfo.provenance} · {Math.round(samInfo.confidence * 100)}%)
+            </span>
+          )}
+        </div>
         <label className="text-sm flex items-center gap-2">Brush radius <input aria-label="Brush radius" type="range" min="2" max="40" value={radius} onChange={e=>setRadius(Number(e.target.value))}/>{radius}px</label>
         <p id="cup-edit-help" className="text-xs">Click outline points or paint with a brush. Keyboard: arrows move the cursor, Shift + arrows move 10px, Space marks/paints, Enter closes an outline. Undo restores a whole brush stroke.</p>
         <canvas ref={canvas} width={photo.width} height={photo.height} tabIndex={0} role="img" aria-label="Cup selection canvas" aria-describedby="cup-edit-help" className="w-full rounded touch-none cursor-crosshair focus:outline-2 focus:outline-white"
@@ -66,11 +94,11 @@ export function CupMaskEditor({initial,onApply,onCancel}:{initial:CupSelection|n
             if(e.key==='Enter'&&tool==='polygon')finish();}}/>
         <p className="text-sm" role="status">{count} selected pixels · {points.length?`${points.length} outline points pending`:'Review edges and holes below'}</p>
         <div className="bg-[#4B5563] border border-white/20 rounded p-2"><p className="text-xs mb-2">Cutout preview — gray areas will reveal the changing background</p><canvas ref={preview} width={photo.width} height={photo.height} role="img" aria-label="Selected cup cutout" className="w-full"/></div>
-        <button type="button" className={button} disabled={count<16||points.length>0} onClick={()=>{try{onApply({photo,mask:mask.slice(),name,revision:(initial?.revision||0)+1});}catch(e){setError(e instanceof Error?e.message:'Selection failed.');}}}>Apply cup to dream</button>
+        <button type="button" className={button} disabled={count<16||points.length>0} onClick={()=>{try{onApply({photo,mask:mask.slice(),name,revision:(initial?.revision||0)+1,source:samInfo?'sam-3.1-photo':'local-manual-photo',provenance:samInfo?.provenance,confidence:samInfo?.confidence,maskRef:samInfo?.maskRef});}catch(e){setError(e instanceof Error?e.message:'Selection failed.');}}}>Apply cup to dream</button>
       </>}
     </fieldset>
     {loading&&<p role="status">Loading photo locally…</p>}{error&&<p role="alert" className="text-[#FDE047]">{error}</p>}
     <button type="button" className={button} onClick={onCancel}>Cancel mask editing</button>
-    <p className="text-xs">Local manual selection, not SAM. Sample: Rachel Michetti / Pikolo Espresso Bar, CC0, via scikit-image. PNG, JPEG or WebP; max 8 MB / 24 MP. Working image is resized to at most 800 × 600. Only fully opaque photo pixels are protected.</p>
+    <p className="text-xs">Interactive selection powered by Meta SAM 3.1 & manual vector/brush tools. Sample: Rachel Michetti / Pikolo Espresso Bar, CC0, via scikit-image. PNG, JPEG or WebP; max 8 MB / 24 MP. Working image is resized to at most 800 × 600. Only fully opaque photo pixels are protected.</p>
   </section>;
 }
