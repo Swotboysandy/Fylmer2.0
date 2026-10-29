@@ -1,7 +1,7 @@
 // Local deterministic compositor. No model/API calls occur in this module.
 export const DREAM = {width: 800, height: 450, duration: 12, fps: 24, hold: 2} as const;
 export type Pixels = {width: number; height: number; data: Uint8ClampedArray};
-export type DreamAssets = {kitchen: Pixels; ocean: Pixels; anchor: Pixels; mask: Uint8Array};
+export type DreamAssets = {kitchen: Pixels; ocean: Pixels; anchor: Pixels; mask: Uint8Array; selectionInfo?: {source: 'local-manual-photo'; name:string; revision:number; sourceSelectedPixels:number}};
 export const dreamProgress = (seconds: number, reduced = false) => {
   const safeTime = Number.isFinite(seconds) ? seconds : 0;
   const t = Math.max(0, Math.min(1, (safeTime - DREAM.hold) / (DREAM.duration - 2 * DREAM.hold)));
@@ -94,7 +94,8 @@ export async function verifyDream(a: DreamAssets, reduced = false, signal?: Abor
     if (i%12===0) await new Promise(r=>setTimeout(r,0));
   }
   timings.sort((a,b)=>a-b);
-  return {mode:'local-composite',backgrounds:'local SD1.5',mask:'authored cup and shadow; not SAM',
+  return {mode:'local-composite',backgrounds:'local SD1.5',mask:a.selectionInfo ? 'user-approved photo mask; local manual selection; not SAM' : 'authored cup and shadow; not SAM',
+    selection:a.selectionInfo || null,
     framesChecked:count, fps:DREAM.fps, durationSeconds:DREAM.duration, reducedMotion:reduced,
     ...measureAnchor(a,frame), changedProtectedPixelsAcrossFrames:drift, maxChannelDelta:maxDelta,
     renderP95Ms:Number(timings[Math.floor(timings.length*0.95)].toFixed(2)),

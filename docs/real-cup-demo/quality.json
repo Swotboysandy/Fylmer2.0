@@ -1,0 +1,23 @@
+{
+  "mode": "local-composite",
+  "backgrounds": "local SD1.5",
+  "mask": "user-approved photo mask; local manual selection; not SAM",
+  "selection": {
+    "source": "local-manual-photo",
+    "name": "CC0 coffee photograph",
+    "revision": 1,
+    "sourceSelectedPixels": 49732
+  },
+  "framesChecked": 289,
+  "fps": 24,
+  "durationSeconds": 12,
+  "reducedMotion": false,
+  "protectedPixels": 21041,
+  "changedProtectedPixels": 0,
+  "maxChannelDelta": 0,
+  "changedProtectedPixelsAcrossFrames": 0,
+  "renderP95Ms": 8.1,
+  "passed": true,
+  "scope": "Uncompressed compositor frames; lossy WebM encoding is not pixel-exact.",
+  "paidApiCalls": 0
+}

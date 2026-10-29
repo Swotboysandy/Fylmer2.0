@@ -1,0 +1,76 @@
+{
+  "date": "2026-10-29",
+  "branch": "rendering-checkpoints",
+  "offlineTestsPassed": 47,
+  "browserTestsPassed": 5,
+  "typecheck": "passed",
+  "productionBuild": "passed",
+  "browserPostRequests": 0,
+  "compositor": {
+    "mode": "local-composite",
+    "backgrounds": "local SD1.5",
+    "mask": "user-approved photo mask; local manual selection; not SAM",
+    "selection": {
+      "source": "local-manual-photo",
+      "name": "CC0 coffee photograph",
+      "revision": 1,
+      "sourceSelectedPixels": 49732
+    },
+    "framesChecked": 289,
+    "fps": 24,
+    "durationSeconds": 12,
+    "reducedMotion": false,
+    "protectedPixels": 21041,
+    "changedProtectedPixels": 0,
+    "maxChannelDelta": 0,
+    "changedProtectedPixelsAcrossFrames": 0,
+    "renderP95Ms": 8.1,
+    "passed": true,
+    "scope": "Uncompressed compositor frames; lossy WebM encoding is not pixel-exact.",
+    "paidApiCalls": 0
+  },
+  "downloadedVideo": {
+    "passed": true,
+    "timestampsStrictlyIncreasing": true,
+    "protectedPixels": 21041,
+    "changedProtectedPixelsPNG": 0,
+    "video": {
+      "programs": [],
+      "stream_groups": [],
+      "streams": [
+        {
+          "codec_name": "vp9",
+          "width": 800,
+          "height": 450,
+          "nb_read_frames": "279"
+        }
+      ],
+      "format": {
+        "duration": "11.993504"
+      }
+    },
+    "lossyEncodingSamples": [
+      {
+        "seconds": 0,
+        "protectedRegionMeanChannelError": 2.928
+      },
+      {
+        "seconds": 3,
+        "protectedRegionMeanChannelError": 2.387
+      },
+      {
+        "seconds": 6,
+        "protectedRegionMeanChannelError": 2.378
+      },
+      {
+        "seconds": 9,
+        "protectedRegionMeanChannelError": 2.383
+      },
+      {
+        "seconds": 11.7,
+        "protectedRegionMeanChannelError": 2.357
+      }
+    ],
+    "note": "Exact protection applies to uncompressed output. WebM is lossy."
+  }
+}

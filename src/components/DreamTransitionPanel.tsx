@@ -1,3 +1,5 @@
+import {CupMaskEditor} from './CupMaskEditor';
+import {applyCupSelection,type CupSelection} from '../services/cupSelection';
 import {useEffect, useRef, useState} from 'react';
 import {useReducedMotion} from 'motion/react';
 import {Play, Pause, Download, ShieldCheck, Waves} from 'lucide-react';
@@ -13,6 +15,9 @@ export function DreamTransitionPanel() {
   const [open,setOpen]=useState(false);
   const [assets,setAssets]=useState<DreamAssets|null>(null);
   const [error,setError]=useState('');
+  const [editing,setEditing]=useState(false);
+  const [selection,setSelection]=useState<CupSelection|null>(null);
+  const original=useRef<DreamAssets|null>(null);
   const [time,setTime]=useState(0);
   const [playing,setPlaying]=useState(false);
   const [overlay,setOverlay]=useState(false);
@@ -26,7 +31,7 @@ export function DreamTransitionPanel() {
   useEffect(()=>{
     if(!open || assets) return;
     let cancelled=false;setError('');
-    loadDreamAssets().then(a=>{if(!cancelled)setAssets(a);}).catch(e=>{if(!cancelled)setError(`Could not load local dream assets: ${e.message}`);});
+    loadDreamAssets().then(a=>{if(!cancelled){original.current=a;setAssets(a);}}).catch(e=>{if(!cancelled)setError(`Could not load local dream assets: ${e.message}`);});
     return()=>{cancelled=true;};
   },[open,assets]);
   useEffect(()=>{setPlaying(false);setReport(null);operation.current?.abort();},[reduced]);
@@ -53,7 +58,7 @@ export function DreamTransitionPanel() {
   },[assets,overlay,open]);
   const seek=(t:number)=>{setPlaying(false);setTime(t);playTime.current=t;};
   const run=async(kind:'check'|'export')=>{
-    if(!assets || busy)return;
+    if(!assets || busy || editing)return;
     setPlaying(false);setError('');setBusy(kind);
     const controller=new AbortController();operation.current=controller;
     try {
@@ -63,38 +68,52 @@ export function DreamTransitionPanel() {
     finally {setBusy(null);operation.current=null;}
   };
   return <section aria-label="Kitchen to ocean dream study" className="bg-[#1E232B] border-2 border-[#323A46] rounded-lg overflow-hidden">
-    <button type="button" aria-expanded={open} aria-controls="dream-study" disabled={Boolean(busy)} onClick={()=>{setOpen(!open);setPlaying(false);}}
+    <button type="button" aria-expanded={open} aria-controls="dream-study" disabled={Boolean(busy)||editing} onClick={()=>{setOpen(!open);setPlaying(false);}}
       className="w-full p-4 text-left flex flex-wrap items-center justify-between gap-3 text-white">
       <span className="flex items-center gap-2 font-semibold"><Waves size={18} aria-hidden="true"/> Kitchen → ocean <span className="text-xs text-[#CBD5E1] font-mono">LOCAL DREAM STUDY</span></span>
       <span className="text-sm underline underline-offset-4">{open?'Close study':'Open dream transition'}</span>
     </button>
     {open && <div id="dream-study" className="p-4 pt-0 space-y-4">
       <div className="flex flex-wrap justify-between gap-2 text-sm text-[#CBD5E1]">
-        <p>Two worlds. One blue cup. A 12-second local composite.</p>
+        <p>Two worlds. One protected cup. A 12-second local composite.</p>
         <span className="inline-flex items-center gap-1"><ShieldCheck size={16} aria-hidden="true"/> Cup layer protected</span>
       </div>
       {!assets && !error && <p role="status">Loading local backgrounds…</p>}
       {assets && <>
+        <div className="flex flex-wrap gap-2">
+          <button type="button" className={button} disabled={Boolean(busy)||editing} onClick={()=>{setEditing(true);setPlaying(false);setReport(null);}}>{selection?'Edit cup mask':'Select real cup'}</button>
+          {selection && <button type="button" className={button} disabled={Boolean(busy)||editing} onClick={()=>{setSelection(null);setAssets(original.current);setReport(null);seek(0);}}>Restore illustrated cup</button>}
+          {selection && <span className="text-sm text-[#CBD5E1]">Approved photo mask · revision {selection.revision}</span>}
+        </div>
+        {editing && <CupMaskEditor initial={selection} onCancel={()=>setEditing(false)} onApply={s=>{
+          const next=applyCupSelection(original.current!,s);setSelection(s);setAssets(next);setReport(null);setOverlay(false);setEditing(false);seek(0);
+        }}/>}
+
         <div className="relative aspect-video bg-[#121417] rounded border border-[#323A46] overflow-hidden">
-          <canvas ref={canvas} width={DREAM.width} height={DREAM.height} role="img" aria-label="Kitchen transforming into ocean with a stationary protected blue cup" className="w-full h-full"/>
+          <canvas ref={canvas} width={DREAM.width} height={DREAM.height} role="img" aria-label="Kitchen transforming into ocean with a stationary protected cup" className="w-full h-full"/>
           {overlay && <canvas ref={maskCanvas} width={DREAM.width} height={DREAM.height} aria-hidden="true" className="absolute inset-0 w-full h-full pointer-events-none"/>}
         </div>
         <div className="flex items-center gap-3">
-          <button type="button" className={button} disabled={Boolean(busy)} aria-label={playing?'Pause dream':'Play dream'} onClick={()=>{if(time>=DREAM.duration)seek(0);setPlaying(!playing);}}>
+          <button type="button" className={button} disabled={Boolean(busy)||editing} aria-label={playing?'Pause dream':'Play dream'} onClick={()=>{if(time>=DREAM.duration)seek(0);setPlaying(!playing);}}>
             {playing?<Pause size={17}/>:<Play size={17}/>}<span>{playing?'Pause':'Play'}</span>
           </button>
-          <label className="flex-1 min-w-0"><span className="sr-only">Dream time</span><input type="range" aria-label="Dream time" min="0" max={DREAM.duration} step="0.01" value={time} disabled={Boolean(busy)} onChange={e=>seek(Number(e.target.value))} className="w-full accent-white"/></label>
+          <label className="flex-1 min-w-0"><span className="sr-only">Dream time</span><input type="range" aria-label="Dream time" min="0" max={DREAM.duration} step="0.01" value={time} disabled={Boolean(busy)||editing} onChange={e=>seek(Number(e.target.value))} className="w-full accent-white"/></label>
           <output aria-live="off" className="text-sm font-mono text-white tabular-nums">{time.toFixed(1)} / 12s</output>
         </div>
         <div className="grid grid-cols-3 gap-2 text-sm">
-          {[[0,'Kitchen'],[6,'World changing'],[12,'Ocean']].map(([t,label])=><button key={t} type="button" className={button} disabled={Boolean(busy)} onClick={()=>seek(Number(t))}>{label}</button>)}
+          {[[0,'Kitchen'],[6,'World changing'],[12,'Ocean']].map(([t,label])=><button key={t} type="button" className={button} disabled={Boolean(busy)||editing} onClick={()=>seek(Number(t))}>{label}</button>)}
         </div>
-        <p className="text-[#E2E8F0] text-sm leading-relaxed">{time<6?'“I was in my grandmother’s kitchen, holding a blue cup. The tiles began to move like water.”':'“The room opened into an ocean. I was still holding the same cup.”'}</p>
+        <p className="text-[#E2E8F0] text-sm leading-relaxed">{time<6?'“I was in my grandmother’s kitchen, holding a cup. The tiles began to move like water.”':'“The room opened into an ocean. I was still holding the same cup.”'}</p>
         <div className="flex flex-wrap items-center gap-2">
           <button className={button} type="button" aria-pressed={overlay} onClick={()=>setOverlay(!overlay)}>{overlay?'Hide':'Show'} protected region</button>
-          <button className={button} type="button" disabled={Boolean(busy)} onClick={()=>void run('check')}>{busy==='check'?'Checking 289 frames…':'Check cup preservation'}</button>
-          <button className={button} type="button" disabled={Boolean(busy)} onClick={()=>void run('export')}><Download size={16} aria-hidden="true"/>{busy==='export'?'Exporting…':'Export dream WebM'}</button>
-          <button className={button} type="button" disabled={Boolean(busy)} onClick={()=>canvas.current?.toBlob(blob=>{if(blob)download(blob,'anchorshot-dream-frame.png');})}>Save PNG frame</button>
+          <button className={button} type="button" disabled={Boolean(busy)||editing} onClick={()=>void run('check')}>{busy==='check'?'Checking 289 frames…':'Check cup preservation'}</button>
+          <button className={button} type="button" disabled={Boolean(busy)||editing} onClick={()=>void run('export')}><Download size={16} aria-hidden="true"/>{busy==='export'?'Exporting…':'Export dream WebM'}</button>
+          <button className={button} type="button" disabled={Boolean(busy)||editing} onClick={()=>{
+            const c=document.createElement('canvas');c.width=DREAM.width;c.height=DREAM.height;const ctx=c.getContext('2d')!,p=ctx.createImageData(c.width,c.height);
+            for(let i=0;i<assets.mask.length;i++){const v=assets.mask[i]?255:0;p.data.set([v,v,v,255],i*4);}ctx.putImageData(p,0,0);
+            c.toBlob(blob=>{if(blob)download(blob,'anchorshot-protected-mask.png');});
+          }}>Save protection mask</button>
+          <button className={button} type="button" disabled={Boolean(busy)||editing} onClick={()=>canvas.current?.toBlob(blob=>{if(blob)download(blob,'anchorshot-dream-frame.png');})}>Save PNG frame</button>
           {busy && <button className={button} type="button" onClick={()=>operation.current?.abort()}>Cancel {busy==='check'?'check':'export'}</button>}
         </div>
         {report && <div role="status" aria-label="Cup preservation results" className="text-sm text-[#E2E8F0] border border-[#4B5563] rounded p-3 space-y-1">
@@ -104,7 +123,7 @@ export function DreamTransitionPanel() {
         </div>}
       </>}
       {error && <p role="alert" className="text-[#FDE047] text-sm">{error}</p>}
-      <p className="text-xs text-[#CBD5E1] leading-relaxed">Local SD1.5 backgrounds · authored cup + shadow mask · ripple/reveal compositor · no SAM or cloud calls. {reduced?'Reduced motion: a cut replaces the ripple in preview and export.':'Scrub or play to review. The protection overlay is excluded from exports.'}</p>
+      <p className="text-xs text-[#CBD5E1] leading-relaxed">Local SD1.5 backgrounds · {selection?'approved photo mask':'authored cup + shadow mask'} · ripple/reveal compositor · no SAM or cloud calls. {reduced?'Reduced motion: a cut replaces the ripple in preview and export.':'Scrub or play to review. The protection overlay is excluded from exports.'}</p>
     </div>}
   </section>;
 }
