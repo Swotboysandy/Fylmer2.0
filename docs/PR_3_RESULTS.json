@@ -1,0 +1,51 @@
+{
+  "offlineTests": 50,
+  "browserChecks": 7,
+  "browserScope": "Passed across targeted runs; see PR_3_REVIEW.md for retries and memory issue",
+  "paidCalls": 0,
+  "liveSamVerified": false,
+  "cup": {
+    "passed": true,
+    "timestampsStrictlyIncreasing": true,
+    "protectedPixels": 21041,
+    "changedProtectedPixelsPNG": 0,
+    "video": {
+      "programs": [],
+      "stream_groups": [],
+      "streams": [
+        {
+          "codec_name": "vp9",
+          "width": 800,
+          "height": 450,
+          "nb_read_frames": "251"
+        }
+      ],
+      "format": {
+        "duration": "11.983970"
+      }
+    },
+    "lossyEncodingSamples": [
+      {
+        "seconds": 0,
+        "protectedRegionMeanChannelError": 2.928
+      },
+      {
+        "seconds": 3,
+        "protectedRegionMeanChannelError": 2.397
+      },
+      {
+        "seconds": 6,
+        "protectedRegionMeanChannelError": 2.403
+      },
+      {
+        "seconds": 9,
+        "protectedRegionMeanChannelError": 2.336
+      },
+      {
+        "seconds": 11.7,
+        "protectedRegionMeanChannelError": 2.359
+      }
+    ],
+    "note": "Exact protection applies to uncompressed output. WebM is lossy."
+  }
+}

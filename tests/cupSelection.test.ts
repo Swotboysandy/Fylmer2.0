@@ -1,5 +1,5 @@
-import {describe,it,expect} from 'vitest';
-import {brushMask,polygonMask,applyCupSelection} from '../src/services/cupSelection';
+import {describe,it,expect,vi} from 'vitest';
+import {brushMask,polygonMask,applyCupSelection,unpackRasterMask,requestSamCupCutout} from '../src/services/cupSelection';
 import {DREAM,renderDreamFrame,measureAnchor,type DreamAssets} from '../src/services/dreamTransition';
 const photo={width:20,height:20,data:new Uint8ClampedArray(20*20*4).fill(255)};
 function base():DreamAssets {const pixels={width:DREAM.width,height:DREAM.height,data:new Uint8ClampedArray(DREAM.width*DREAM.height*4).fill(40)};return {kitchen:pixels,ocean:{...pixels,data:new Uint8ClampedArray(pixels.data.length).fill(200)},anchor:pixels,mask:new Uint8Array(DREAM.width*DREAM.height)};}
@@ -23,4 +23,59 @@ describe('photo cup mask',()=>{
   const b=base();for(const mask of [new Uint8Array(400),new Uint8Array(5),new Uint8Array(400).fill(2)])expect(()=>applyCupSelection(b,{photo,mask,name:'x',revision:1})).toThrow();
   expect(()=>applyCupSelection(b,{photo:{...photo,data:new Uint8ClampedArray(1600)},mask:new Uint8Array(400).fill(1),name:'x',revision:1})).toThrow();
  });
+ it('handles SAM 3.1 cutout provenance, custom source and unpackRasterMask', async () => {
+  const raster = new Uint8Array([1, 0, 1, 1]);
+  const unpacked = unpackRasterMask({ left: 2, top: 2, right: 6, bottom: 6 }, 2, 2, raster, 10, 10);
+  expect(unpacked.length).toBe(100);
+  expect(unpacked[0]).toBe(0);
+  expect(unpacked[2 * 10 + 2]).toBe(1);
+  expect(unpacked[2 * 10 + 4]).toBe(0);
+
+  const b = base();
+  const m = new Uint8Array(400).fill(1);
+  const a = applyCupSelection(b, {
+    photo,
+    mask: m,
+    name: 'sam-cup.png',
+    revision: 3,
+    source: 'sam-3.1-photo',
+    provenance: 'live-sam-3.1',
+    confidence: 0.965,
+    maskRef: 'sam-3.1:cup:0:v3',
+  });
+  expect(a.selectionInfo?.source).toBe('sam-3.1-photo');
+  expect(a.selectionInfo?.provenance).toBe('live-sam-3.1');
+  expect(a.selectionInfo?.confidence).toBe(0.965);
+  expect(a.selectionInfo?.maskRef).toBe('sam-3.1:cup:0:v3');
+
+  const fallback = await requestSamCupCutout(photo, 'cup');
+  expect(fallback.mask.length).toBe(400);
+  expect(fallback.mask.some(Boolean)).toBe(true);
+  expect(fallback.provenance).toBe('offline-fixture');
+  expect(fallback.confidence).toBe(0);
+
+  // Guards against malformed or short rasters at trust boundary
+  expect(unpackRasterMask(null as any, 2, 2, raster, 10, 10).length).toBe(100);
+  expect(unpackRasterMask({ left: 0, top: 0, right: 10, bottom: 10 }, 2, 2, new Uint8Array(2), 10, 10).some(Boolean)).toBe(false);
+
+  // Verifies live SAM raster base64 unpacking and bounds mapping
+  const fakeBinary = new Uint8Array([1, 1, 1, 1]);
+  const simulatedMask = unpackRasterMask({ left: 4, top: 4, right: 8, bottom: 8 }, 2, 2, fakeBinary, 20, 20);
+  expect(simulatedMask.some(Boolean)).toBe(true);
+  expect(simulatedMask[4 * 20 + 4]).toBe(1);
+  expect(simulatedMask[0]).toBe(0);
+ });
+});
+
+it('offline mode performs no fetch even when a key might be configured',async()=>{
+ const fetch=vi.spyOn(globalThis,'fetch');
+ await requestSamCupCutout(photo);
+ expect(fetch).not.toHaveBeenCalled();fetch.mockRestore();
+});
+it('rejects fractional dimensions, nonbinary rasters and nonfinite bounds',()=>{
+ for(const [rw,rh,raster,bounds] of [
+ [1.5,2,new Uint8Array(3),{left:0,top:0,right:4,bottom:4}],
+ [2,2,new Uint8Array([1,255,0,1]),{left:0,top:0,right:4,bottom:4}],
+ [2,2,new Uint8Array(4).fill(1),{left:0,top:0,right:Infinity,bottom:4}],
+ ] as const)expect(unpackRasterMask(bounds,rw,rh,raster,10,10).some(Boolean)).toBe(false);
 });

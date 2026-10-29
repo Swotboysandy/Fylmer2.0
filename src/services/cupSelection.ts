@@ -1,6 +1,15 @@
 import {DREAM, validateAssets, type DreamAssets, type Pixels} from './dreamTransition';
 export type Point = {x:number;y:number};
-export type CupSelection = {photo:Pixels; mask:Uint8Array; name:string; revision:number};
+export type CupSelection = {
+  photo: Pixels;
+  mask: Uint8Array;
+  name: string;
+  revision: number;
+  source?: 'local-manual-photo' | 'sam-3.1-photo';
+  provenance?: string;
+  confidence?: number;
+  maskRef?: string;
+};
 export function polygonMask(width:number,height:number,points:Point[]) {
   const mask=new Uint8Array(width*height);
   if(points.length<3)return mask;
@@ -42,9 +51,161 @@ export function applyCupSelection(base:DreamAssets,selection:CupSelection):Dream
     const source=sy*photo.width+sx,target=(y0+y)*DREAM.width+x0+x;
     if(mask[source] && photo.data[source*4+3]===255){targetMask[target]=1;anchor.set(photo.data.subarray(source*4,source*4+4),target*4);}
   }
-  const result={...base,mask:targetMask,anchor:{width:DREAM.width,height:DREAM.height,data:anchor},
-    selectionInfo:{source:'local-manual-photo' as const,name:selection.name,revision:selection.revision,sourceSelectedPixels:count}};
-  validateAssets(result);return result;
+  const result = {
+    ...base,
+    mask: targetMask,
+    anchor: {width: DREAM.width, height: DREAM.height, data: anchor},
+    selectionInfo: {
+      source: (selection.source ?? 'local-manual-photo') as 'local-manual-photo' | 'sam-3.1-photo',
+      name: selection.name,
+      revision: selection.revision,
+      sourceSelectedPixels: count,
+      provenance: selection.provenance,
+      confidence: selection.confidence,
+      maskRef: selection.maskRef,
+    },
+  };
+  validateAssets(result);
+  return result;
+}
+
+export function unpackRasterMask(
+  bounds: { left: number; top: number; right: number; bottom: number },
+  rw: number,
+  rh: number,
+  raster: Uint8Array,
+  targetWidth: number,
+  targetHeight: number,
+): Uint8Array {
+  const full = new Uint8Array(targetWidth * targetHeight);
+  if (
+    !bounds ||
+    !Number.isInteger(rw) ||
+    !Number.isInteger(rh) ||
+    rw <= 0 ||
+    rh <= 0 ||
+    raster.length !== rw * rh ||
+    !Object.values(bounds).every(Number.isFinite) ||
+    raster.some(v => v !== 0 && v !== 1)
+  ) {
+    return full;
+  }
+  const left = Math.max(0, Math.min(targetWidth, Math.floor(bounds.left || 0)));
+  const right = Math.max(left, Math.min(targetWidth, Math.floor(bounds.right || 0)));
+  const top = Math.max(0, Math.min(targetHeight, Math.floor(bounds.top || 0)));
+  const bottom = Math.max(top, Math.min(targetHeight, Math.floor(bounds.bottom || 0)));
+  const bw = right - left;
+  const bh = bottom - top;
+  if (bw <= 0 || bh <= 0) return full;
+  for (let y = top; y < bottom; y++) {
+    const my = Math.min(rh - 1, Math.floor(((y - top) * rh) / bh));
+    for (let x = left; x < right; x++) {
+      const mx = Math.min(rw - 1, Math.floor(((x - left) * rw) / bw));
+      full[y * targetWidth + x] = raster[my * rw + mx] ?? 0;
+    }
+  }
+  return full;
+}
+
+export async function requestSamCupCutout(
+  photo: Pixels,
+  concept = 'cup',
+  options: {allowLive?: boolean; signal?: AbortSignal} = {},
+): Promise<{ mask: Uint8Array; provenance: string; confidence: number; maskRef?: string }> {
+  try {
+    if (options.allowLive && typeof document !== 'undefined') {
+      const canvas = document.createElement('canvas');
+      canvas.width = photo.width;
+      canvas.height = photo.height;
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+        const img = ctx.createImageData(photo.width, photo.height);
+        img.data.set(photo.data);
+        ctx.putImageData(img, 0, 0);
+        const dataUrl = canvas.toDataURL('image/png');
+        const b64 = dataUrl.split(',')[1];
+        if (b64 && typeof crypto !== 'undefined' && crypto.subtle) {
+          const binStr = atob(b64);
+          const bytes = new Uint8Array(binStr.length);
+          for (let i = 0; i < binStr.length; i++) bytes[i] = binStr.charCodeAt(i);
+          const digest = await crypto.subtle.digest('SHA-256', bytes);
+          const hash = Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, '0')).join('');
+
+          const healthRes = await fetch('/api/health', {signal: options.signal ?? AbortSignal.timeout(30000)});
+          const health = healthRes.ok ? await healthRes.json() : null;
+          const token = health?.sessionToken || '';
+
+          const res = await fetch('/api/segment/check', {
+            method: 'POST',
+            signal: options.signal ?? AbortSignal.timeout(30000),
+            headers: {
+              'Content-Type': 'application/json',
+              'X-Framelock-Session': token,
+              'X-Anchorshot-Session': token,
+            },
+            body: JSON.stringify({
+              image: dataUrl,
+              concept,
+              sourceHash: hash,
+            }),
+          });
+          if (res.ok) {
+            const data = await res.json();
+            const primary = data.objects?.find((o: any) => o.objectId === data.selectedObjectId) ?? data.objects?.[0];
+            if (
+              primary &&
+              primary.bounds &&
+              Number.isFinite(primary.rasterWidth) &&
+              Number.isFinite(primary.rasterHeight) &&
+              primary.rasterWidth > 0 &&
+              primary.rasterHeight > 0 &&
+              typeof primary.rasterBase64 === 'string'
+            ) {
+              const rBin = atob(primary.rasterBase64);
+              const raster = new Uint8Array(rBin.length);
+              for (let i = 0; i < rBin.length; i++) raster[i] = rBin.charCodeAt(i);
+              const mask = unpackRasterMask(
+                primary.bounds,
+                primary.rasterWidth,
+                primary.rasterHeight,
+                raster,
+                photo.width,
+                photo.height,
+              );
+              if (mask.some(Boolean)) {
+                return {
+                  mask,
+                  provenance: data.provenance === 'live-sam-3.1' ? 'live-sam-3.1' : 'offline-fixture',
+                  confidence: typeof primary.confidence === 'number' && Number.isFinite(primary.confidence) ? Math.max(0, Math.min(1, primary.confidence)) : 0,
+                  maskRef: data.maskRef,
+                };
+              }
+            }
+          }
+        }
+      }
+    }
+  } catch (error) {
+    if (options.allowLive) throw error;
+  }
+  if (options.allowLive) throw new Error('SAM returned no valid mask. Your current selection was preserved.');
+
+  const mask = new Uint8Array(photo.width * photo.height);
+  const cx = photo.width * 0.5, cy = photo.height * 0.5;
+  const rx = photo.width * 0.28, ry = photo.height * 0.35;
+  for (let y = 0; y < photo.height; y++) {
+    for (let x = 0; x < photo.width; x++) {
+      if (((x - cx) / rx) ** 2 + ((y - cy) / ry) ** 2 <= 1) {
+        mask[y * photo.width + x] = 1;
+      }
+    }
+  }
+  return {
+    mask,
+    provenance: 'offline-fixture',
+    confidence: 0,
+    maskRef: `sam-3.1:${concept}:0:offline`,
+  };
 }
 export async function decodeCupPhoto(blob:Blob):Promise<Pixels> {
   if(!['image/png','image/jpeg','image/webp'].includes(blob.type))throw new Error('Choose a PNG, JPEG or WebP image.');
