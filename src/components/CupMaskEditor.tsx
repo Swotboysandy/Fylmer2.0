@@ -1,8 +1,8 @@
 import {useEffect,useRef,useState} from 'react';
-import {brushMask,decodeCupPhoto,polygonMask,requestSamCupCutout,type CupSelection,type Point} from '../services/cupSelection';
+import {brushMask,decodeCupPhoto,polygonMask,umbrellaSample,requestSamCupCutout,type CupSelection,type Point} from '../services/cupSelection';
 import type {Pixels} from '../services/dreamTransition';
 const button='min-h-[40px] px-3 py-2 border border-[#4B5563] rounded bg-[#16191E] text-sm text-white disabled:opacity-40';
-export function CupMaskEditor({initial,onApply,onCancel}:{initial:CupSelection|null;onApply:(s:CupSelection)=>void;onCancel:()=>void}) {
+export function CupMaskEditor({initial,onApply,onCancel,objectKind='cup'}:{objectKind?:'cup'|'umbrella';initial:CupSelection|null;onApply:(s:CupSelection)=>void;onCancel:()=>void}) {
   const [photo,setPhoto]=useState<Pixels|null>(initial?.photo||null),[name,setName]=useState(initial?.name||'');
   const [mask,setMask]=useState<Uint8Array>(initial?.mask.slice()||new Uint8Array()),[points,setPoints]=useState<Point[]>([]);
   const [tool,setTool]=useState<'polygon'|'add'|'erase'>('polygon'),[radius,setRadius]=useState(12);
@@ -30,7 +30,7 @@ export function CupMaskEditor({initial,onApply,onCancel}:{initial:CupSelection|n
     const id=++request.current;
     setSamLoading(true);setError('');
     try {
-      const res=await requestSamCupCutout(photo,'cup');
+      const res=await requestSamCupCutout(photo,objectKind);
       if(request.current!==id)return;
       checkpoint();update(res.mask);setPoints([]);setTool('add');
       setSamInfo({provenance:res.provenance,confidence:res.confidence,maskRef:res.maskRef});
@@ -57,13 +57,13 @@ export function CupMaskEditor({initial,onApply,onCancel}:{initial:CupSelection|n
   const paint=(p:Point,from=p)=>{if(photo)update(brushMask(maskRef.current,photo.width,photo.height,from,p,radius,tool==='add'));};
   const finish=()=>{if(photo&&points.length>=3){checkpoint();update(polygonMask(photo.width,photo.height,points));setPoints([]);setTool('add');}};
   const count=mask.reduce((a,v)=>a+v,0);
-  return <section aria-label="Real cup mask editor" className="space-y-3 border border-[#4B5563] rounded p-3 text-[#E2E8F0]">
-    <h3 className="font-semibold text-white">Select your real cup</h3>
-    <p className="text-sm">Trace the cup, close the outline, then add missing pixels or erase background and handle holes. Review the cutout before applying. Photos stay in this browser.</p>
+  return <section aria-label={objectKind==='cup'?'Real cup mask editor':'Umbrella mask editor'} className="space-y-3 border border-[#4B5563] rounded p-3 text-[#E2E8F0]">
+    <h3 className="font-semibold text-white">Select your {objectKind}</h3>
+    <p className="text-sm">Trace the {objectKind}, close the outline, then add missing pixels or erase background and handle holes. Review the cutout before applying. Photos stay in this browser.</p>
     <fieldset disabled={loading||samLoading} className="space-y-3 min-w-0">
       <div className="flex flex-wrap gap-2 items-center">
-        <label className="text-sm">Cup photo <input aria-label="Upload cup photo" type="file" accept="image/png,image/jpeg,image/webp" className="block max-w-full" onChange={e=>{const file=e.target.files?.[0];if(file)void load(file,file.name);e.target.value='';}}/></label>
-        <button type="button" className={button} onClick={()=>void sample()}>Use real cup sample</button>
+        <label className="text-sm">{objectKind} photo <input aria-label={`Upload ${objectKind} photo`} type="file" accept="image/png,image/jpeg,image/webp" className="block max-w-full" onChange={e=>{const file=e.target.files?.[0];if(file)void load(file,file.name);e.target.value='';}}/></label>
+        <button type="button" className={button} onClick={()=>{if(objectKind==='cup')void sample();else{const sample=umbrellaSample();setPhoto(sample.photo);setName('Authored umbrella illustration');update(new Uint8Array(sample.mask.length));setPoints([]);setHistory([]);setTool('polygon');}}}>{objectKind==='cup'?'Use real cup sample':'Use umbrella sample'}</button>
       </div>
       {photo && <>
         <div className="flex flex-wrap items-center gap-2" aria-label="Mask tools">
@@ -76,6 +76,7 @@ export function CupMaskEditor({initial,onApply,onCancel}:{initial:CupSelection|n
           </button>
         </div>
         <div className="flex flex-wrap items-center gap-3">
+          {objectKind==='umbrella' && name==='Authored umbrella illustration' && <button type="button" className={button} onClick={()=>{checkpoint();update(umbrellaSample().mask);setPoints([]);setTool('erase');}}>Start umbrella sample mask</button>}
           {name==='CC0 coffee photograph' && <button type="button" className={button} onClick={()=>{checkpoint();update(polygonMask(photo.width,photo.height,[{x:174,y:108},{x:186,y:65},{x:217,y:34},{x:267,y:18},{x:322,y:21},{x:366,y:43},{x:397,y:76},{x:411,y:119},{x:401,y:168},{x:380,y:215},{x:348,y:258},{x:285,y:283},{x:248,y:279},{x:229,y:305},{x:209,y:310},{x:195,y:289},{x:198,y:260},{x:214,y:234},{x:193,y:201},{x:180,y:158}]));setPoints([]);setTool('erase');}}>Start rough sample outline</button>}
           {samInfo && (
             <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded text-xs bg-[#0F172A] border border-[#38BDF8]/60 text-[#38BDF8]">
@@ -86,7 +87,7 @@ export function CupMaskEditor({initial,onApply,onCancel}:{initial:CupSelection|n
         </div>
         <label className="text-sm flex items-center gap-2">Brush radius <input aria-label="Brush radius" type="range" min="2" max="40" value={radius} onChange={e=>setRadius(Number(e.target.value))}/>{radius}px</label>
         <p id="cup-edit-help" className="text-xs">Click outline points or paint with a brush. Keyboard: arrows move the cursor, Shift + arrows move 10px, Space marks/paints, Enter closes an outline. Undo restores a whole brush stroke.</p>
-        <canvas ref={canvas} width={photo.width} height={photo.height} tabIndex={0} role="img" aria-label="Cup selection canvas" aria-describedby="cup-edit-help" className="w-full rounded touch-none cursor-crosshair focus:outline-2 focus:outline-white"
+        <canvas ref={canvas} width={photo.width} height={photo.height} tabIndex={0} role="img" aria-label={`${objectKind==='cup'?'Cup':'Umbrella'} selection canvas`} aria-describedby="cup-edit-help" className="w-full rounded touch-none cursor-crosshair focus:outline-2 focus:outline-white"
           onPointerDown={e=>{if(loading||samLoading)return;e.preventDefault();e.currentTarget.focus();const p=point(e);setCursor(p);if(tool==='polygon'){setPoints(v=>[...v,p]);return;}checkpoint();stroke.current=p;e.currentTarget.setPointerCapture(e.pointerId);paint(p);}}
           onPointerMove={e=>{if(loading||samLoading||!stroke.current)return;const p=point(e);paint(p,stroke.current);stroke.current=p;setCursor(p);}}
           onPointerUp={()=>{stroke.current=null;}} onPointerCancel={()=>{stroke.current=null;}} onLostPointerCapture={()=>{stroke.current=null;}}
@@ -95,12 +96,12 @@ export function CupMaskEditor({initial,onApply,onCancel}:{initial:CupSelection|n
             if(e.key===' '){if(tool==='polygon')setPoints(p=>[...p,cursor]);else{checkpoint();paint(cursor);}}
             if(e.key==='Enter'&&tool==='polygon')finish();}}/>
         <p className="text-sm" role="status">{count} selected pixels · {points.length?`${points.length} outline points pending`:'Review edges and holes below'}</p>
-        <div className="bg-[#4B5563] border border-white/20 rounded p-2"><p className="text-xs mb-2">Cutout preview — gray areas will reveal the changing background</p><canvas ref={preview} width={photo.width} height={photo.height} role="img" aria-label="Selected cup cutout" className="w-full"/></div>
-        <button type="button" className={button} disabled={count<16||points.length>0} onClick={()=>{try{onApply({photo,mask:mask.slice(),name,revision:(initial?.revision||0)+1,source:samInfo?.provenance==='live-sam-3.1'?'sam-3.1-photo':'local-manual-photo',provenance:samInfo?.provenance,confidence:samInfo?.confidence,maskRef:samInfo?.maskRef});}catch(e){setError(e instanceof Error?e.message:'Selection failed.');}}}>Apply cup to dream</button>
+        <div className="bg-[#4B5563] border border-white/20 rounded p-2"><p className="text-xs mb-2">Cutout preview — gray areas will reveal the changing background</p><canvas ref={preview} width={photo.width} height={photo.height} role="img" aria-label={`Selected ${objectKind} cutout`} className="w-full"/></div>
+        <button type="button" className={button} disabled={count<16||points.length>0} onClick={()=>{try{onApply({photo,mask:mask.slice(),name,revision:(initial?.revision||0)+1,source:samInfo?.provenance==='live-sam-3.1'?'sam-3.1-photo':'local-manual-photo',provenance:samInfo?.provenance,confidence:samInfo?.confidence,maskRef:samInfo?.maskRef});}catch(e){setError(e instanceof Error?e.message:'Selection failed.');}}}>Apply {objectKind} to dream</button>
       </>}
     </fieldset>
     {loading&&<p role="status">Loading photo locally…</p>}{error&&<p role="alert" className="text-[#FDE047]">{error}</p>}
     <button type="button" className={button} onClick={onCancel}>Cancel mask editing</button>
-    <p className="text-xs">Offline mode: the starter shape is synthetic, not SAM segmentation. Trace or correct it before applying. No model calls or credits are used. Sample: Rachel Michetti / Pikolo Espresso Bar, CC0, via scikit-image. PNG, JPEG or WebP; max 8 MB / 24 MP. Working image is resized to at most 800 × 600. Only fully opaque photo pixels are protected.</p>
+    <p className="text-xs">Offline mode: the starter shape is synthetic, not SAM segmentation. Trace or correct it before applying. No model calls or credits are used. Umbrella sample: authored illustration. Cup sample: Rachel Michetti / Pikolo Espresso Bar, CC0, via scikit-image. PNG, JPEG or WebP; max 8 MB / 24 MP. Working image is resized to at most 800 × 600. Only fully opaque photo pixels are protected.</p>
   </section>;
 }

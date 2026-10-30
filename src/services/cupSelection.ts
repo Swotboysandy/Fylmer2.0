@@ -34,7 +34,7 @@ export function brushMask(mask:Uint8Array,w:number,h:number,from:Point,to:Point,
   }
   return result;
 }
-export function applyCupSelection(base:DreamAssets,selection:CupSelection):DreamAssets {
+export function applyCupSelection(base:DreamAssets,selection:CupSelection,placement={centerX:250,bottom:360,maxWidth:200,maxHeight:190}):DreamAssets {
   const {photo,mask}=selection;
   if(mask.length!==photo.width*photo.height || photo.data.length!==mask.length*4 || mask.some(v=>v!==0&&v!==1))throw new Error('Invalid photo mask.');
   let left=photo.width,top=photo.height,right=-1,bottom=-1,count=0;
@@ -42,10 +42,11 @@ export function applyCupSelection(base:DreamAssets,selection:CupSelection):Dream
     const x=i%photo.width,y=Math.floor(i/photo.width);left=Math.min(left,x);right=Math.max(right,x);top=Math.min(top,y);bottom=Math.max(bottom,y);count++;
   }
   if(count<16)throw new Error('Select at least 16 opaque photo pixels before applying.');
-  const cropW=right-left+1,cropH=bottom-top+1,scale=Math.min(200/cropW,190/cropH);
+  const cropW=right-left+1,cropH=bottom-top+1,scale=Math.min(placement.maxWidth/cropW,placement.maxHeight/cropH);
   const width=Math.max(1,Math.round(cropW*scale)),height=Math.max(1,Math.round(cropH*scale));
   const targetMask=new Uint8Array(DREAM.width*DREAM.height),anchor=base.kitchen.data.slice();
-  const x0=250-Math.floor(width/2),y0=360-height;
+  const x0=placement.centerX-Math.floor(width/2),y0=placement.bottom-height;
+  if(![x0,y0,width,height].every(Number.isInteger)||x0<0||y0<0||x0+width>DREAM.width||y0+height>DREAM.height)throw new Error('Object placement must fit the dream frame.');
   for(let y=0;y<height;y++)for(let x=0;x<width;x++){
     const sx=left+Math.min(cropW-1,Math.floor(x/width*cropW)),sy=top+Math.min(cropH-1,Math.floor(y/height*cropH));
     const source=sy*photo.width+sx,target=(y0+y)*DREAM.width+x0+x;
@@ -218,4 +219,32 @@ export async function decodeCupPhoto(blob:Blob):Promise<Pixels> {
     const ctx=canvas.getContext('2d')!;ctx.drawImage(bitmap,0,0,canvas.width,canvas.height);
     return ctx.getImageData(0,0,canvas.width,canvas.height);
   }finally{bitmap.close();}
+}
+
+export function applyDreamSelections(base:DreamAssets,cup:CupSelection|null,umbrella:CupSelection|null):DreamAssets {
+  if(!cup&&!umbrella)return base;
+  const cupLayer=cup?applyCupSelection(base,cup):base;
+  const layers=[{id:'cup',name:cup?.name??'Illustrated cup',revision:cup?.revision??0,assets:cupLayer}];
+  if(umbrella)layers.push({id:'umbrella',name:umbrella.name,revision:umbrella.revision,assets:applyCupSelection(base,umbrella,{centerX:600,bottom:380,maxWidth:250,maxHeight:300})});
+  const mask=new Uint8Array(base.mask.length),data=base.kitchen.data.slice();
+  for(const layer of layers)for(let i=0;i<mask.length;i++)if(layer.assets.mask[i]){
+    if(mask[i])throw new Error('Protected objects overlap. Use separate placements.');
+    mask[i]=1;data.set(layer.assets.anchor.data.subarray(i*4,i*4+4),i*4);
+  }
+  const result:DreamAssets={...cupLayer,mask,anchor:{width:base.kitchen.width,height:base.kitchen.height,data},anchors:layers.map(l=>({id:l.id,name:l.name,revision:l.revision,mask:l.assets.mask.slice()}))};
+  validateAssets(result);return result;
+}
+
+// Authored offline illustration, not a photograph or model segmentation.
+export function umbrellaSample() {
+  const canvas=document.createElement('canvas');canvas.width=400;canvas.height=400;
+  const ctx=canvas.getContext('2d')!;
+  ctx.strokeStyle='#262626';ctx.lineWidth=12;ctx.lineCap='round';
+  ctx.beginPath();ctx.moveTo(200,65);ctx.lineTo(200,310);ctx.bezierCurveTo(200,355,145,355,145,315);ctx.stroke();
+  ctx.fillStyle='#dca92c';ctx.beginPath();ctx.moveTo(40,180);ctx.bezierCurveTo(65,15,335,15,360,180);
+  ctx.quadraticCurveTo(320,150,280,180);ctx.quadraticCurveTo(240,150,200,180);ctx.quadraticCurveTo(160,150,120,180);ctx.quadraticCurveTo(80,150,40,180);ctx.fill();
+  ctx.strokeStyle='#6b5010';ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(200,56);ctx.quadraticCurveTo(135,80,120,177);ctx.moveTo(200,56);ctx.quadraticCurveTo(265,80,280,177);ctx.stroke();
+  const cut=ctx.getImageData(0,0,400,400),mask=Uint8Array.from({length:160000},(_,i)=>cut.data[i*4+3]>128?1:0);
+  ctx.globalCompositeOperation='destination-over';ctx.fillStyle='#eeeeee';ctx.fillRect(0,0,400,400);
+  return {photo:ctx.getImageData(0,0,400,400),mask};
 }

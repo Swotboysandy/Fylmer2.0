@@ -1,0 +1,41 @@
+{
+  "mode": "local-composite",
+  "backgrounds": "local SD1.5",
+  "mask": "user-approved photo mask; local manual selection; not SAM",
+  "selection": {
+    "source": "local-manual-photo",
+    "name": "CC0 coffee photograph",
+    "revision": 1,
+    "sourceSelectedPixels": 49732
+  },
+  "objects": [
+    {
+      "id": "cup",
+      "name": "CC0 coffee photograph",
+      "revision": 1,
+      "protectedPixels": 21041,
+      "changedProtectedPixelsAcrossFrames": 0,
+      "maxChannelDelta": 0
+    },
+    {
+      "id": "umbrella",
+      "name": "Authored umbrella illustration",
+      "revision": 1,
+      "protectedPixels": 17902,
+      "changedProtectedPixelsAcrossFrames": 0,
+      "maxChannelDelta": 0
+    }
+  ],
+  "framesChecked": 289,
+  "fps": 24,
+  "durationSeconds": 12,
+  "reducedMotion": false,
+  "protectedPixels": 38943,
+  "changedProtectedPixels": 0,
+  "maxChannelDelta": 0,
+  "changedProtectedPixelsAcrossFrames": 0,
+  "renderP95Ms": 11.8,
+  "passed": true,
+  "scope": "Uncompressed compositor frames; lossy WebM encoding is not pixel-exact.",
+  "paidApiCalls": 0
+}

@@ -1,0 +1,44 @@
+{
+  "passed": true,
+  "objects": {
+    "cup": {
+      "protectedPixels": 21041,
+      "changedPixelsPNG": 0,
+      "lossyVideoMeanChannelErrors": [
+        2.928,
+        2.383,
+        2.388,
+        2.377,
+        2.345
+      ]
+    },
+    "umbrella": {
+      "protectedPixels": 17902,
+      "changedPixelsPNG": 0,
+      "lossyVideoMeanChannelErrors": [
+        2.961,
+        2.775,
+        2.957,
+        2.987,
+        2.967
+      ]
+    }
+  },
+  "video": {
+    "programs": [],
+    "stream_groups": [],
+    "streams": [
+      {
+        "codec_name": "vp9",
+        "width": 800,
+        "height": 450,
+        "nb_read_frames": "288"
+      }
+    ],
+    "format": {
+      "duration": "11.994543"
+    }
+  },
+  "timestampsStrictlyIncreasing": true,
+  "scope": "Exact protection in PNG/uncompressed frames; video is lossy, variable frame rate."
+}
