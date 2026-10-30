@@ -8,7 +8,7 @@ export default defineConfig({
   reporter: 'list',
   use: {
     baseURL: 'http://127.0.0.1:4317',
-    channel: 'chrome',
+    channel: process.env.PLAYWRIGHT_CHANNEL || 'msedge',
     headless: true,
     viewport: { width: 1440, height: 1080 },
     trace: 'retain-on-failure',

@@ -176,13 +176,13 @@ export function CleanStudio(p: Props) {
                       </Button>)}
                     </div>}
                     {hasStory && <div className="direction-suggestions">
-                      <Button variant="outline" size="sm" onClick={() => setCommand('Fix shot 2')}>
+                      <Button variant="outline" size="sm" onClick={() => { setCommand(''); p.onCommand('Fix shot 2'); }}>
                         Fix shot 2 <ArrowUpRight size={12} />
                       </Button>
                       <Button
                         variant="outline"
                         size="sm"
-                        onClick={() => setCommand('Narrate the scene')}
+                        onClick={() => { setCommand(''); p.onCommand('Narrate the scene'); }}
                       >
                         Describe this scene <ArrowUpRight size={12} />
                       </Button>
@@ -360,7 +360,7 @@ export function CleanStudio(p: Props) {
         <span>ANCHORSHOT / LOCAL STUDIO</span>
         <details>
           <summary>Activity</summary>
-          <p role="status" aria-live="polite">
+          <p>
             {p.status}
           </p>
         </details>
