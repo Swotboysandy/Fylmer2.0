@@ -8,8 +8,6 @@ const COLORS = ['#b7b7b7', '#ffffff', '#252525'] as const;
 type Props = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onType: () => void;
-  onTranscript?: (transcript: string) => void;
 };
 
 /** Persistent entry to voice with local metering. */

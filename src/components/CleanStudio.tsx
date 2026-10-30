@@ -451,13 +451,6 @@ export function CleanStudio(p: Props) {
       <VoiceOverlay
         open={voiceOpen}
         onOpenChange={setVoiceOpen}
-        onTranscript={(text) => setCommand(text)}
-        onType={() => {
-          setWorkspace('create');
-          setInputMode('describe');
-          setVoiceNotice(true);
-          setFocusDirection(true);
-        }}
       />
     </div>
   );
