@@ -1,4 +1,7 @@
 import '@fontsource-variable/inter';
+import '@fontsource/dm-sans/400.css';
+import '@fontsource/dm-sans/500.css';
+import '@fontsource/dm-sans/600.css';
 import '@fontsource-variable/jetbrains-mono';
 import '@fontsource-variable/plus-jakarta-sans';
 import {createRoot} from 'react-dom/client';

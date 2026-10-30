@@ -1,0 +1,38 @@
+[
+  {
+    "file": "src\\components\\ui\\prompt-input.tsx",
+    "source": "https://www.prompt-kit.com/c/prompt-input.json",
+    "sourceSha256": "ab41a75fe8705a49b5c5871e185bf150219ecd969abb4ffce3d2680086417c5c",
+    "adaptation": "Import paths only; component markup and classes unchanged."
+  },
+  {
+    "file": "src\\components\\ui\\tabs.tsx",
+    "source": "https://ui.shadcn.com/r/styles/new-york/tabs.json",
+    "sourceSha256": "d41aded0394298102614635e15d709369c6bdae8fe79b918b8341ef39407ee03",
+    "adaptation": "Import paths only; component markup and classes unchanged."
+  },
+  {
+    "file": "src\\components\\ui\\button.tsx",
+    "source": "https://ui.shadcn.com/r/styles/new-york/button.json",
+    "sourceSha256": "c2b999a96781e6c932632bd089095368e973bf5602e1b1a62156b7d2b43f1e84",
+    "adaptation": "Import paths only; component markup and classes unchanged."
+  },
+  {
+    "file": "src\\components\\ui\\slider.tsx",
+    "source": "https://ui.shadcn.com/r/styles/new-york/slider.json",
+    "sourceSha256": "16dad0a2c58fba2a38740ab9b15936f1f9a07d0e3aafccdce875b6bac31d79be",
+    "adaptation": "Import paths only; component markup and classes unchanged."
+  },
+  {
+    "file": "src\\components\\ui\\textarea.tsx",
+    "source": "https://ui.shadcn.com/r/styles/new-york/textarea.json",
+    "sourceSha256": "ec7c92aaed80f6923a7caa4bfe4eead395b50a7001504fd7fbb0b9381804dae9",
+    "adaptation": "Import paths only; component markup and classes unchanged."
+  },
+  {
+    "file": "src\\components\\ui\\tooltip.tsx",
+    "source": "https://ui.shadcn.com/r/styles/new-york/tooltip.json",
+    "sourceSha256": "ce6afa34fb9dae51053a863b4c3f7c6e55f3da23b00149f31a8e4402bc963be0",
+    "adaptation": "Import paths only; component markup and classes unchanged."
+  }
+]

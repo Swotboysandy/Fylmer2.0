@@ -2,7 +2,7 @@ import {test,expect} from '@playwright/test';
 import {mkdir,readFile} from 'node:fs/promises';
 test('independent cup and umbrella corrections survive transition and export offline',async({page})=>{
  test.setTimeout(90000);const posts:string[]=[],errors:string[]=[];page.on('request',r=>{if(r.method()==='POST')posts.push(r.url());});page.on('pageerror',e=>errors.push(e.message));
- await page.goto('/');await page.getByRole('button',{name:/Open dream transition/}).click();
+ await page.goto('/');await page.getByRole('textbox',{name:'Describe your video or edit'}).fill('A kitchen opens onto an ocean. A blue cup stays in place.');await page.getByRole('button',{name:'Apply direction',exact:true}).click();await page.getByRole('region',{name:'Film preview'}).waitFor();await page.getByRole('tab',{name:'Dream',exact:true}).click();await page.getByRole('button',{name:/Open dream transition/}).click();
  await page.getByRole('button',{name:'Select real cup',exact:true}).click();
  await page.getByRole('button',{name:'Use real cup sample'}).click();await page.getByRole('button',{name:'Start rough sample outline'}).click();await page.getByRole('button',{name:'Apply cup to dream'}).click();
  await page.getByRole('button',{name:'Select umbrella',exact:true}).click();await page.getByRole('button',{name:'Use umbrella sample'}).click();
@@ -26,7 +26,7 @@ test('independent cup and umbrella corrections survive transition and export off
  expect(posts).toEqual([]);expect(errors).toEqual([]);
 });
 test('umbrella upload and keyboard correction work on mobile independently of cup',async({page})=>{
- await page.setViewportSize({width:390,height:844});await page.goto('/');await page.getByRole('button',{name:/Open dream transition/}).click();await page.getByRole('button',{name:'Select umbrella',exact:true}).click();
+ await page.setViewportSize({width:390,height:844});await page.goto('/');await page.getByRole('textbox',{name:'Describe your video or edit'}).fill('A kitchen opens onto an ocean. A blue cup stays in place.');await page.getByRole('button',{name:'Apply direction',exact:true}).click();await page.getByRole('region',{name:'Film preview'}).waitFor();await page.getByRole('tab',{name:'Dream',exact:true}).click();await page.getByRole('button',{name:/Open dream transition/}).click();await page.getByRole('button',{name:'Select umbrella',exact:true}).click();
  await page.getByLabel('Upload umbrella photo').setInputFiles('public/dream/real-cup.png');
  const editor=page.getByRole('region',{name:'Umbrella mask editor'});const c=editor.getByRole('img',{name:'Umbrella selection canvas'});await expect(c).toBeVisible();
  const box=(await c.boundingBox())!;for(const [x,y]of [[0.3,0.2],[0.6,0.2],[0.5,0.7]])await c.click({position:{x:box.width*x,y:box.height*y}});

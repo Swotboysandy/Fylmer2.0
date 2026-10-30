@@ -28,12 +28,7 @@
     font-variant-numeric: tabular-nums;
   }
 
-  /* High-Contrast WCAG 2.2 AAA Focus Ring */
-  *:focus-visible {
-    outline: 3px solid #38BDF8 !important;
-    outline-offset: 2px !important;
-    box-shadow: 0 0 0 5px rgba(18, 20, 23, 0.9), 0 0 0 7px #FFFFFF !important;
-  }
+  :focus-visible { outline: 2px solid white; outline-offset: 3px; }
 }
 
 .tabular-nums {
@@ -59,4 +54,38 @@
 
 ::-webkit-scrollbar-thumb:hover {
   background: #38BDF8;
+}
+
+/* shadcn/ui neutral dark tokens; published components retain their own classes. */
+@theme inline {
+ --color-background: hsl(var(--background));
+ --color-foreground: hsl(var(--foreground));
+ --color-primary: hsl(var(--primary));
+ --color-primary-foreground: hsl(var(--primary-foreground));
+ --color-secondary: hsl(var(--secondary));
+ --color-secondary-foreground: hsl(var(--secondary-foreground));
+ --color-muted: hsl(var(--muted));
+ --color-muted-foreground: hsl(var(--muted-foreground));
+ --color-accent: hsl(var(--accent));
+ --color-accent-foreground: hsl(var(--accent-foreground));
+ --color-destructive: hsl(var(--destructive));
+ --color-destructive-foreground: hsl(var(--destructive-foreground));
+ --color-popover: hsl(var(--popover));
+ --color-popover-foreground: hsl(var(--popover-foreground));
+ --color-border: hsl(var(--border));
+ --color-input: hsl(var(--input));
+ --color-ring: hsl(var(--ring));
+ --radius-lg: var(--radius);
+ --radius-md: calc(var(--radius) - 2px);
+ --radius-sm: calc(var(--radius) - 4px);
+}
+:root {
+ --background: 0 0% 3.9%; --foreground: 0 0% 98%;
+ --primary: 0 0% 98%; --primary-foreground: 0 0% 9%;
+ --secondary: 0 0% 14.9%; --secondary-foreground: 0 0% 98%;
+ --muted: 0 0% 14.9%; --muted-foreground: 0 0% 63.9%;
+ --accent: 0 0% 14.9%; --accent-foreground: 0 0% 98%;
+ --popover: 0 0% 3.9%; --popover-foreground: 0 0% 98%;
+ --destructive: 0 62.8% 30.6%; --destructive-foreground: 0 0% 98%;
+ --border: 0 0% 14.9%; --input: 0 0% 14.9%; --ring: 0 0% 83.1%; --radius: 0.5rem;
 }

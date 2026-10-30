@@ -6,7 +6,7 @@ test('local dream preserves cup, scrubs, exports and cancels without model calls
   const errors:string[]=[], posts:string[]=[];
   page.on('pageerror',e=>errors.push(e.message));
   page.on('request',r=>{if(r.method()==='POST')posts.push(r.url());});
-  await page.goto('/');
+  await page.goto('/');await page.getByRole('textbox',{name:'Describe your video or edit'}).fill('A kitchen opens onto an ocean. A blue cup stays in place.');await page.getByRole('button',{name:'Apply direction',exact:true}).click();await page.getByRole('region',{name:'Film preview'}).waitFor();await page.getByRole('tab',{name:'Dream',exact:true}).click();
   await page.getByRole('button',{name:/Open dream transition/}).click();
   const study=page.getByRole('region',{name:'Kitchen to ocean dream study'});
   await expect(study.getByRole('img',{name:/Kitchen transforming/})).toBeVisible();
@@ -49,7 +49,7 @@ test('local dream preserves cup, scrubs, exports and cancels without model calls
 });
 
 test('reduced motion, keyboard scrubbing and mobile layout',async({page})=>{
-  await page.emulateMedia({reducedMotion:'reduce'});await page.setViewportSize({width:390,height:844});await page.goto('/');
+  await page.emulateMedia({reducedMotion:'reduce'});await page.setViewportSize({width:390,height:844});await page.goto('/');await page.getByRole('textbox',{name:'Describe your video or edit'}).fill('A kitchen opens onto an ocean. A blue cup stays in place.');await page.getByRole('button',{name:'Apply direction',exact:true}).click();await page.getByRole('region',{name:'Film preview'}).waitFor();await page.getByRole('tab',{name:'Dream',exact:true}).click();
   await page.getByRole('button',{name:/Open dream transition/}).click();
   const study=page.getByRole('region',{name:'Kitchen to ocean dream study'});
   await expect(study.getByText(/Reduced motion: a cut/)).toBeVisible();
@@ -70,7 +70,7 @@ test('reduced motion, keyboard scrubbing and mobile layout',async({page})=>{
 
 test('missing local background fails closed without export',async({page})=>{
   await page.route('**/dream/ocean.png',route=>route.fulfill({status:404,body:'missing'}));
-  await page.goto('/');await page.getByRole('button',{name:/Open dream transition/}).click();
+  await page.goto('/');await page.getByRole('textbox',{name:'Describe your video or edit'}).fill('A kitchen opens onto an ocean. A blue cup stays in place.');await page.getByRole('button',{name:'Apply direction',exact:true}).click();await page.getByRole('region',{name:'Film preview'}).waitFor();await page.getByRole('tab',{name:'Dream',exact:true}).click();await page.getByRole('button',{name:/Open dream transition/}).click();
   const study=page.getByRole('region',{name:'Kitchen to ocean dream study'});
   await expect(study.getByRole('alert')).toContainText('Could not load local dream assets');
   await expect(study.getByRole('button',{name:'Export dream WebM'})).toHaveCount(0);

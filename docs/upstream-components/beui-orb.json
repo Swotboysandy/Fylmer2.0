@@ -1,0 +1,20 @@
+[
+  {
+    "file": "src\\components\\agents\\voice-orb.tsx",
+    "source": "https://beui.dev/r/voice-orb.json",
+    "sha256": "7b737ab7cd92c6c192f489b06e8a6cfa2c2cb01d2c2931c535742e96063b41e3",
+    "changes": "Import paths only; shader and component otherwise unchanged."
+  },
+  {
+    "file": "src\\components\\agents\\voice-orb\\renderer.ts",
+    "source": "https://beui.dev/r/voice-orb.json",
+    "sha256": "4dbfbf64f488731e40a824eff784fd3b6d0691b44d64fe2328d20c79972b6c0e",
+    "changes": "Import paths only; shader and component otherwise unchanged."
+  },
+  {
+    "file": "src\\lib\\ease.ts",
+    "source": "https://beui.dev/r/voice-orb.json",
+    "sha256": "bdfa2814cffaa4d974a5fc8614868ddb89e0310a0ead9e7105f2e8132b219ff3",
+    "changes": "Import paths only; shader and component otherwise unchanged."
+  }
+]

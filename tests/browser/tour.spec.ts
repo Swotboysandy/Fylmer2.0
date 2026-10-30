@@ -1,6 +1,7 @@
 import {test,expect} from '@playwright/test';
 test('animated tour navigates all steps, pauses, closes and leaves project untouched',async({page})=>{
  const posts:string[]=[];page.on('request',r=>{if(r.method()==='POST')posts.push(r.url());});await page.goto('/');
+ await page.getByRole('tab',{name:'Paste a script',exact:true}).click();
  const transcript=page.getByRole('textbox',{name:'Scene Transcript',exact:false});const before=await transcript.inputValue();
  await page.getByRole('button',{name:'UI tour',exact:true}).click();const tour=page.getByRole('dialog');await expect(tour).toBeVisible();await expect(tour.getByRole('button',{name:'Back',exact:true})).toBeDisabled();
  await expect(tour.getByTestId('tour-preview')).toHaveAttribute('data-motion','playing');

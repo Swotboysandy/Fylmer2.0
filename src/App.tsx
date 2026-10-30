@@ -1,3 +1,4 @@
+import {CleanStudio} from './components/CleanStudio';
 import {isLocalImage} from './services/localGeneration';
 import { useReducedMotion } from 'motion/react';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -15,10 +16,7 @@ import {
   renderMuseStoryboardFrame,
 } from './services/canvasEngine';
 import { VoiceTranscriptPanel } from './components/VoiceTranscriptPanel';
-import { StoryboardStage } from './components/StoryboardStage';
-import { AudioTimeline } from './components/AudioTimeline';
 import { ShotInspectorPanel } from './components/ShotInspectorPanel';
-import { StudioTour } from './components/StudioTour';
 import { KeyboardShortcutsModal } from './components/KeyboardShortcutsModal';
 
 export default function App() {
@@ -28,15 +26,15 @@ export default function App() {
   const [projectState, setProjectState] = useState<ProjectState>({
     projectId: 'proj-anchorshot-01',
     title: initialPreset.title,
-    transcript: initialPreset.transcript,
+    transcript: '',
     isRecording: false,
     rules: [],
     shots: [],
     activeShotId: null,
     isPlayingAnimatic: false,
-    isProcessing: true,
+    isProcessing: false,
     statusAnnouncement:
-      'Anchorshot Studio initialized. Loading Sequence 01: Midnight Diner Rain and running continuity audit.',
+      'Describe your story or paste a script to begin.',
   });
 
   const [activePresetId, setActivePresetId] = useState<string>(initialPreset.id);
@@ -51,8 +49,6 @@ export default function App() {
   const [isShortcutsModalOpen, setIsShortcutsModalOpen] = useState<boolean>(false);
   const [modelLogs, setModelLogs] = useState<ModelInvocationRecord[]>([]);
 
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const audioChunksRef = useRef<Blob[]>([]);
   const lastNarratedShotIdInAnimaticRef = useRef<string | null>(null);
 
   // Subscribe to speech synthesis state and Meta Model logs
@@ -71,30 +67,6 @@ export default function App() {
       speechService.speak(message, true);
     }
   }, []);
-
-  // Load initial storyboard sequence on mount
-  useEffect(() => {
-    let mounted = true;
-    metaModelClient
-      .generateStoryboardFromTranscript(initialPreset.transcript, undefined, true)
-      .then(({ rules, shots }) => {
-        if (!mounted) return;
-        const mismatchShot = shots.find((s) => s.status === 'mismatch');
-        setProjectState((prev) => ({
-          ...prev,
-          rules,
-          shots,
-          activeShotId: mismatchShot ? mismatchShot.id : shots[0]?.id || null,
-          isProcessing: false,
-          statusAnnouncement: `Loaded ${shots.length} storyboard shots. Continuity Alert in Shot ${
-            mismatchShot?.shotNumber || 2
-          }: ${mismatchShot?.discrepancyMessage || 'Discrepancy detected.'} Press Y to apply SAM 3.1 fix or N to narrate.`,
-        }));
-      });
-    return () => {
-      mounted = false;
-    };
-  }, [initialPreset.transcript]);
 
   // Compute total animatic duration
   const totalDurationSeconds = useMemo(
@@ -157,6 +129,7 @@ export default function App() {
   const handleRebuildFromTranscript = useCallback(
     async (injectDiscrepancy: boolean = true, overrideTranscript?: string) => {
       const targetTranscript = overrideTranscript ?? projectState.transcript;
+      if (!targetTranscript.trim()) return;
       setProjectState((prev) => ({
         ...prev,
         isProcessing: true,
@@ -535,6 +508,11 @@ export default function App() {
   // Execute natural voice or text command (`muse-spark-1.3` intent router)
   const handleExecuteVoiceCommand = useCallback(
     async (commandText: string) => {
+      if (!commandText.trim()) return;
+      if (!projectState.shots.length) {
+        await handleRebuildFromTranscript(false, commandText.trim());
+        return;
+      }
       const lower = commandText.toLowerCase();
 
       if (lower.includes('fix')) {
@@ -591,63 +569,10 @@ export default function App() {
     ]
   );
 
-  // Toggle Voice Recording (`muse-voice-transcribe-1.0`)
-  const handleToggleRecording = useCallback(async () => {
-    if (projectState.isRecording) {
-      // Stop recording
-      speechService.playEarcon('recordStop');
-      if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
-        mediaRecorderRef.current.stop();
-      } else {
-        setProjectState((prev) => ({ ...prev, isRecording: false, isProcessing: true }));
-        const { transcript: transcribedCommand } = await metaModelClient.transcribeAudio(
-          null,
-          'Fix continuity mismatch in Shot 2 using SAM 3.1'
-        );
-        await handleExecuteVoiceCommand(transcribedCommand);
-      }
-      return;
-    }
-
-    // Start recording
-    speechService.stopSpeaking();
-    speechService.playEarcon('recordStart');
-    setProjectState((prev) => ({
-      ...prev,
-      isRecording: true,
-      statusAnnouncement:
-        'Microphone active. Speak your director command or continuity rule now. Press V again to finish.',
-    }));
-
-    try {
-      if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        const recorder = new MediaRecorder(stream);
-        audioChunksRef.current = [];
-
-        recorder.ondataavailable = (e) => {
-          if (e.data.size > 0) audioChunksRef.current.push(e.data);
-        };
-
-        recorder.onstop = async () => {
-          stream.getTracks().forEach((track) => track.stop());
-          const blob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
-          setProjectState((prev) => ({ ...prev, isRecording: false, isProcessing: true }));
-          const { transcript: transcribed } = await metaModelClient.transcribeAudio(
-            blob,
-            'Fix continuity mismatch in Shot 2 using SAM 3.1'
-          );
-          await handleExecuteVoiceCommand(transcribed);
-        };
-
-        mediaRecorderRef.current = recorder;
-        recorder.start();
-      }
-    } catch {
-      // Fallback for environments without physical mic hardware: keep recording state active until user presses [V]
-      mediaRecorderRef.current = null;
-    }
-  }, [projectState.isRecording, handleExecuteVoiceCommand]);
+  // Offline mode must not substitute a demo command for recorded speech.
+  const handleToggleRecording = useCallback(() => {
+    announceStatus('Voice transcription is offline. Type your direction in Create or Review.');
+  }, [announceStatus]);
 
   // Toggle Animatic Playback (`isPlayingAnimatic`)
   const handleTogglePlayAnimatic = useCallback(() => {
@@ -910,107 +835,29 @@ export default function App() {
     }));
   };
 
-  return (
-    <div className="min-h-screen bg-[#121417] text-white flex flex-col">
-      {/* Skip to Main Storyboard Stage Link for Screen Readers */}
-      <a
-        href="#main-storyboard-workspace"
-        className="sr-only focus:not-sr-only focus:fixed focus:top-3 focus:left-3 focus:z-50 focus:px-4 focus:py-2.5 focus:bg-[#38BDF8] focus:text-[#121417] focus:font-bold focus:rounded"
-      >
-        Skip to Main Storyboard Workspace
-      </a>
-
-      {/* Strict 3-Zone Top Navigation Bar Contract */}
-      <header className="flex items-center justify-between gap-8 px-6 py-4 bg-[#1E232B] border-b-2 border-[#323A46]">
-        {/* Zone 1: Single text element wordmark */}
-        <a
-          href="#top"
-          className="text-xl font-bold tracking-tight text-white font-display whitespace-nowrap shrink-0"
-        >
-          Anchorshot
-        </a>
-
-        {/* Zone 2: 4 concise single-line text navigation links */}
-        <nav
-          aria-label="Primary Studio Navigation"
-          className="hidden md:flex items-center gap-6 text-sm font-medium text-[#E2E8F0]"
-        >
-          <button
-            type="button"
-            onClick={() => setViewMode('grid')}
-            className="hover:text-white hover:underline underline-offset-4 transition-colors whitespace-nowrap shrink-0"
-          >
-            Storyboard
-          </button>
-          <button
-            type="button"
-            onClick={() => setViewMode('animatic')}
-            className="hover:text-white hover:underline underline-offset-4 transition-colors whitespace-nowrap shrink-0"
-          >
-            Animatic Stage
-          </button>
-          <button
-            type="button"
-            onClick={handleRunFullAudit}
-            className="hover:text-white hover:underline underline-offset-4 transition-colors whitespace-nowrap shrink-0"
-          >
-            Continuity Audit
-          </button>
-          <button
-            type="button"
-            onClick={() => setIsShortcutsModalOpen(true)}
-            className="hover:text-white hover:underline underline-offset-4 transition-colors whitespace-nowrap shrink-0"
-          >
-            Shortcuts [?]
-          </button>
-
-        </nav>
-
-        {/* Zone 3: 1 primary action */}
-        <div className="flex items-center gap-3 shrink-0">
-          <button
-            type="button"
-            onClick={handleTogglePlayAnimatic}
-            className="min-h-[44px] px-4 py-2 text-sm font-bold text-[#121417] bg-[#38BDF8] hover:bg-[#7DD3FC] rounded transition-colors whitespace-nowrap shrink-0"
-          >
-            {projectState.isPlayingAnimatic ? 'Pause Animatic [SPACE]' : 'Play Animatic [SPACE]'}
-          </button>
-        </div>
-      </header>
-      <div className="px-6 py-2 border-b border-[#323A46] bg-[#16191E] text-[#E2E8F0] flex items-center gap-3"><StudioTour /><span className="text-xs">Learn selection, correction and dream export</span></div>
-
-      {/* Persistent High-Contrast Screen Reader / Voice Status Dock (aria-live="polite") */}
-      <div
-        role="status"
-        aria-live="polite"
-        aria-atomic="true"
-        className="px-6 py-3 bg-[#16191E] border-b-2 border-[#323A46] flex flex-wrap items-center justify-between gap-4"
-      >
-        <div className="flex items-center gap-3 min-w-0">
-          <span className="px-2 py-0.5 bg-[#0F172A] border border-[#38BDF8] rounded text-xs font-mono font-bold text-[#38BDF8] whitespace-nowrap shrink-0">
-            ARIA-LIVE STATUS
-          </span>
-          <p className="font-mono text-sm font-semibold text-white truncate">
-            {projectState.statusAnnouncement}
-          </p>
-        </div>
-
-        <div className="flex flex-wrap items-center gap-3 text-xs font-mono text-[#E2E8F0]">
-          <span>KEYS:</span>
-          <kbd className="px-1.5 py-0.5 bg-[#0F172A] text-[#38BDF8] rounded">[V] Voice</kbd>
-          <kbd className="px-1.5 py-0.5 bg-[#0F172A] text-[#38BDF8] rounded">[N] Narrate</kbd>
-          <kbd className="px-1.5 py-0.5 bg-[#0F172A] text-[#38BDF8] rounded">[Y] Fix</kbd>
-          <kbd className="px-1.5 py-0.5 bg-[#0F172A] text-[#38BDF8] rounded">[←/→] Shot</kbd>
-        </div>
-      </div>
-
-      {/* Main 3-Column Tactile Studio Workspace */}
-      <main
-        id="main-storyboard-workspace"
-        className="flex-1 w-full max-w-[1600px] mx-auto p-4 md:p-6 flex flex-col xl:flex-row items-stretch gap-6"
-      >
-        {/* Left Dock: Live Voice Transcript & Continuity Rules */}
-        <VoiceTranscriptPanel
+  return <CleanStudio shots={projectState.shots} activeShot={activeShot} transcript={projectState.transcript}
+    processing={projectState.isProcessing} playing={projectState.isPlayingAnimatic} time={currentTimeSeconds} duration={totalDurationSeconds}
+    status={projectState.statusAnnouncement} muted={isMuted} onMute={handleToggleMute}
+    onTranscript={text=>setProjectState(prev=>({...prev,transcript:text}))} onGenerate={()=>void handleRebuildFromTranscript(false)}
+    onCommand={text=>void handleExecuteVoiceCommand(text)} onSelect={id=>handleSelectShot(id)} onPlay={handleTogglePlayAnimatic}
+    onSeek={handleScrubTime} onNarrate={()=>{if(activeShot)handleNarrateShot(activeShot);}} onExport={()=>void handleExportAnimaticVideo()} exporting={isExportingVideo}
+    onAudit={handleRunFullAudit} onShortcuts={()=>setIsShortcutsModalOpen(true)}
+    inspector={<ShotInspectorPanel
+          onUseLocalImage={handleUseLocalImage}
+          activeShot={activeShot}
+          showSamMaskOverlay={showSamMaskOverlay}
+          showBeforeComparison={showBeforeComparison}
+          isProcessing={projectState.isProcessing}
+          modelLogs={modelLogs}
+          onToggleSamMaskOverlay={() => setShowSamMaskOverlay((prev) => !prev)}
+          onToggleBeforeComparison={handleToggleBeforeComparison}
+          onNarrateShot={handleNarrateShot}
+          onApplyProposedFix={handleApplyProposedFix}
+          onDisambiguateShot={handleDisambiguateShot}
+          onSegmentObjectManual={handleSegmentObjectManual}
+          onRevertShotRevision={handleRevertShotRevision}
+          onUpdateShotPrompt={handleUpdateShotPrompt}
+        />} controls={<VoiceTranscriptPanel
           transcript={projectState.transcript}
           isRecording={projectState.isRecording}
           isProcessing={projectState.isProcessing}
@@ -1027,70 +874,8 @@ export default function App() {
           onExecuteVoiceCommand={handleExecuteVoiceCommand}
           onAddOrUpdateRule={handleAddOrUpdateRule}
           onToggleMute={handleToggleMute}
-        />
-
-        {/* Center Stage: Storyboard Frames Grid / Animatic Monitor + Audio Scrubbing Timeline */}
-        <div className="flex-1 min-w-0 flex flex-col gap-6">
-          <p className="text-xs font-mono text-[#94A3B8]">LOCAL MODE / Sample scenes + optional GPU generation / No cloud model calls</p>
-          <StoryboardStage
-            currentTimeSeconds={currentTimeSeconds}
-            transitionsEnabled={transitionsEnabled}
-            onSetTransitionsEnabled={setTransitionsEnabled}
-            shots={projectState.shots}
-            rules={projectState.rules}
-            activeShotId={projectState.activeShotId}
-            showSamMaskOverlay={showSamMaskOverlay}
-            showBeforeComparison={showBeforeComparison}
-            isExportingVideo={isExportingVideo}
-            isPlayingAnimatic={projectState.isPlayingAnimatic}
-            viewMode={viewMode}
-            onSetViewMode={setViewMode}
-            onSelectShot={handleSelectShot}
-            onNarrateShot={handleNarrateShot}
-            onApplyProposedFix={(shotId) => handleApplyProposedFix(shotId)}
-            onRunFullAudit={handleRunFullAudit}
-            onToggleSamMaskOverlay={() => setShowSamMaskOverlay((prev) => !prev)}
-            onToggleBeforeComparison={handleToggleBeforeComparison}
-            onExportProjectJson={handleExportProjectJson}
-            onExportAnimaticVideo={handleExportAnimaticVideo}
-          />
-
-          <AudioTimeline
-            shots={projectState.shots}
-            activeShotId={projectState.activeShotId}
-            isPlayingAnimatic={projectState.isPlayingAnimatic}
-            currentTimeSeconds={currentTimeSeconds}
-            totalDurationSeconds={totalDurationSeconds}
-            onSelectShot={handleSelectShot}
-            onTogglePlayAnimatic={handleTogglePlayAnimatic}
-            onScrubTime={handleScrubTime}
-          />
-        </div>
-
-        {/* Right Dock: Active Shot Continuity & SAM 3.1 Inspector */}
-        <ShotInspectorPanel
-          onUseLocalImage={handleUseLocalImage}
-          activeShot={activeShot}
-          showSamMaskOverlay={showSamMaskOverlay}
-          showBeforeComparison={showBeforeComparison}
-          isProcessing={projectState.isProcessing}
-          modelLogs={modelLogs}
-          onToggleSamMaskOverlay={() => setShowSamMaskOverlay((prev) => !prev)}
-          onToggleBeforeComparison={handleToggleBeforeComparison}
-          onNarrateShot={handleNarrateShot}
-          onApplyProposedFix={handleApplyProposedFix}
-          onDisambiguateShot={handleDisambiguateShot}
-          onSegmentObjectManual={handleSegmentObjectManual}
-          onRevertShotRevision={handleRevertShotRevision}
-          onUpdateShotPrompt={handleUpdateShotPrompt}
-        />
-      </main>
-
-      {/* Accessible Keyboard & Voice Command Reference Modal */}
-      <KeyboardShortcutsModal
+        />} shortcuts={<KeyboardShortcutsModal
         isOpen={isShortcutsModalOpen}
         onClose={() => setIsShortcutsModalOpen(false)}
-      />
-    </div>
-  );
+      />} />;
 }

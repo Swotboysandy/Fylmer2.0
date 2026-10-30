@@ -1,0 +1,103 @@
+{
+  "xerjVersion": "1.0.0-rc.100",
+  "endpoint": "http://127.0.0.1:9237",
+  "retrieval": "BM25 with code analyzer; no semantic embeddings",
+  "indicesBeforeFinalProjectRefresh": [
+    {
+      "health": "green",
+      "status": "open",
+      "index": "ref-opencut-docs",
+      "uuid": "e141b0ca-108d-e27d-6e79-5dc83c211593",
+      "pri": "1",
+      "rep": "0",
+      "docs.count": "532",
+      "docs.deleted": "0",
+      "store.size": "438.7kb",
+      "pri.store.size": "438.7kb"
+    },
+    {
+      "health": "green",
+      "status": "open",
+      "index": "anchorshot-docs",
+      "uuid": "553fb129-cf83-6728-86b9-adac89c5ab7b",
+      "pri": "1",
+      "rep": "0",
+      "docs.count": "484",
+      "docs.deleted": "0",
+      "store.size": "1.4mb",
+      "pri.store.size": "1.4mb"
+    },
+    {
+      "health": "green",
+      "status": "open",
+      "index": "ref-opencut-apps-web",
+      "uuid": "eb50bb0d-e46c-fdb2-f1c7-e11752009399",
+      "pri": "1",
+      "rep": "0",
+      "docs.count": "131",
+      "docs.deleted": "0",
+      "store.size": "17.3kb",
+      "pri.store.size": "17.3kb"
+    },
+    {
+      "health": "green",
+      "status": "open",
+      "index": "autoindex-catalog",
+      "uuid": "e1fe6145-1ddb-1bf1-6693-2fc9a0eb64bf",
+      "pri": "1",
+      "rep": "0",
+      "docs.count": "1480",
+      "docs.deleted": "0",
+      "store.size": "428.6kb",
+      "pri.store.size": "428.6kb"
+    },
+    {
+      "health": "green",
+      "status": "open",
+      "index": "ref-motion-docs",
+      "uuid": "b8394429-e99d-4a3e-430a-77becd2ee2b5",
+      "pri": "1",
+      "rep": "0",
+      "docs.count": "4398",
+      "docs.deleted": "0",
+      "store.size": "3.4mb",
+      "pri.store.size": "3.4mb"
+    },
+    {
+      "health": "green",
+      "status": "open",
+      "index": "ref-prompt-kit-docs",
+      "uuid": "3bae50b1-c51e-d70a-824b-cab83af8cac9",
+      "pri": "1",
+      "rep": "0",
+      "docs.count": "664",
+      "docs.deleted": "0",
+      "store.size": "1.4mb",
+      "pri.store.size": "1.4mb"
+    },
+    {
+      "health": "green",
+      "status": "open",
+      "index": "ref-sam2-docs",
+      "uuid": "3c50f4a1-53b2-043e-7748-589c642e9f4e",
+      "pri": "1",
+      "rep": "0",
+      "docs.count": "1645",
+      "docs.deleted": "0",
+      "store.size": "3.2mb",
+      "pri.store.size": "3.2mb"
+    },
+    {
+      "health": "green",
+      "status": "open",
+      "index": "ref-shadcn-ui-docs",
+      "uuid": "998eee50-d1f7-f4bc-3b7c-ab81a9da46ee",
+      "pri": "1",
+      "rep": "0",
+      "docs.count": "524",
+      "docs.deleted": "0",
+      "store.size": "1.2mb",
+      "pri.store.size": "1.2mb"
+    }
+  ]
+}

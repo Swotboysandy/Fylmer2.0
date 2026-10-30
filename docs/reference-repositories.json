@@ -1,0 +1,56 @@
+[
+  {
+    "name": "prompt-kit",
+    "repository": "https://github.com/ibelick/prompt-kit",
+    "commit": "5a9496635cc0e1bf7679fe2a9e35d9b36b99c08a",
+    "paths": [
+      "components",
+      "app/docs"
+    ]
+  },
+  {
+    "name": "shadcn-ui",
+    "repository": "https://github.com/shadcn-ui/ui",
+    "commit": "b8d7baa15b1dca5716f13153e63795fc3d741f6b",
+    "paths": [
+      "apps/v4/registry/new-york-v4/ui",
+      "apps/www/registry/new-york/ui"
+    ]
+  },
+  {
+    "name": "opencut",
+    "repository": "https://github.com/OpenCut-app/OpenCut",
+    "commit": "e668010778568641babef2cc40be4703ae6916d6",
+    "paths": [
+      "apps/web/src",
+      "apps/desktop/src"
+    ]
+  },
+  {
+    "name": "sam2",
+    "repository": "https://github.com/facebookresearch/sam2",
+    "commit": "2b90b9f5ceec907a1c18123530e92e794ad901a4",
+    "paths": [
+      "sam2",
+      "demo"
+    ]
+  },
+  {
+    "name": "motion",
+    "repository": "https://github.com/motiondivision/motion",
+    "commit": "7415b6cd14dfdb35d91dfc5b9758994444cc228b",
+    "paths": [
+      "packages/framer-motion/src",
+      "packages/motion-dom/src"
+    ]
+  },
+  {
+    "name": "beui",
+    "repository": "https://github.com/starc007/ui-components",
+    "commit": "b0031261cd40d55b42a027c22721d3e994106e6f",
+    "paths": [
+      "components/agents/voice-orb",
+      "lib"
+    ]
+  }
+]

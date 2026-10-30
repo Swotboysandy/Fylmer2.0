@@ -1,3 +1,3 @@
 import {spawnSync} from 'node:child_process';
-const result=spawnSync(process.execPath,['node_modules/@playwright/test/cli.js','test','tests/browser/cup.spec.ts','tests/browser/dream.spec.ts','tests/browser/samCup.spec.ts','tests/browser/twoAnchors.spec.ts','tests/browser/tour.spec.ts'],{stdio:'inherit'});
+const result=spawnSync(process.execPath,['node_modules/@playwright/test/cli.js','test','tests/browser/cup.spec.ts','tests/browser/dream.spec.ts','tests/browser/samCup.spec.ts','tests/browser/twoAnchors.spec.ts','tests/browser/tour.spec.ts','tests/browser/cleanStudio.spec.ts','tests/browser/voiceOverlay.spec.ts'],{stdio:'inherit'});
 process.exit(result.status ?? 1);
