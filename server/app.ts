@@ -320,11 +320,19 @@ export function createApp(options: Options) {
       typeof req.body?.text === 'string' && req.body.text.trim()
         ? req.body.text.trim()
         : 'Continuity Rule across all shots: the ceramic coffee cup must be blue.';
+    const words = text.split(/\s+/).filter(Boolean);
+    const timestamps = words.map((word, i) => ({
+      word,
+      start: +(i * 0.32).toFixed(2),
+      end: +((i + 1) * 0.32 - 0.04).toFixed(2),
+      confidence: 0.99,
+    }));
     res.json({
       transcript: text,
       confidence: 0.992,
       model: 'muse-voice-transcribe-1.0',
       provenance: 'offline-fixture',
+      timestamps,
     });
   });
 

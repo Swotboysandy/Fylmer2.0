@@ -11,6 +11,7 @@ import {
 } from './types/framelock';
 import { DIRECTOR_PRESETS, metaModelClient } from './services/metaModels';
 import { speechService } from './services/speechService';
+import { speechRecognitionService } from './services/speechRecognitionService';
 import {
   exportStoryboardAnimaticVideo,
   renderMuseStoryboardFrame,
@@ -569,10 +570,66 @@ export default function App() {
     ]
   );
 
-  // Offline mode must not substitute a demo command for recorded speech.
-  const handleToggleRecording = useCallback(() => {
-    announceStatus('Voice transcription is offline. Type your direction in Create or Review.');
+  const handleTestLocalDictation = useCallback(async () => {
+    announceStatus('Running local voice dictation test...');
+    const sample =
+      'Continuity Rule across all shots: the ceramic coffee cup must be blue. Shot 2 has a red cup discrepancy—segment the cup and recolor it to cobalt blue.';
+    await speechRecognitionService.simulateLocalSpeech(sample, {
+      onResult: (text, isFinal) => {
+        setProjectState((prev) => ({ ...prev, transcript: text }));
+        if (isFinal) {
+          announceStatus('Local voice test completed: transcript generated.', true);
+        }
+      },
+      onStateChange: (listening) => {
+        setProjectState((prev) => ({ ...prev, isRecording: listening }));
+      },
+    });
   }, [announceStatus]);
+
+  // Start or stop real Speech-to-Text via Web Speech API (with local test fallback)
+  const handleToggleRecording = useCallback(() => {
+    if (speechRecognitionService.isListening() || projectState.isRecording) {
+      speechRecognitionService.stopListening();
+      setProjectState((prev) => ({ ...prev, isRecording: false }));
+      announceStatus('Voice capture stopped. Transcript updated.');
+      return;
+    }
+
+    if (speechRecognitionService.isSupported()) {
+      announceStatus('Listening for voice input... Speak now.');
+      const baseTranscript = projectState.transcript.trim();
+      const started = speechRecognitionService.startListening({
+        continuous: true,
+        interimResults: true,
+        onResult: (text, isFinal) => {
+          // Replace with current utterance relative to base snapshot to avoid interim duplication
+          setProjectState((prev) => ({
+            ...prev,
+            transcript: baseTranscript ? `${baseTranscript} ${text}` : text,
+          }));
+          if (isFinal) {
+            announceStatus(`Recorded voice: "${text}"`, false);
+          }
+        },
+        onError: (err) => {
+          announceStatus(err);
+          setProjectState((prev) => ({ ...prev, isRecording: false }));
+        },
+        onStateChange: (listening) => {
+          setProjectState((prev) => ({ ...prev, isRecording: listening }));
+        },
+      });
+
+      if (!started) {
+        announceStatus('Could not access microphone. Try local sample dictation.');
+        setProjectState((prev) => ({ ...prev, isRecording: false }));
+      }
+    } else {
+      announceStatus('Web Speech API is unavailable in this browser. Running local test dictation.');
+      void handleTestLocalDictation();
+    }
+  }, [announceStatus, handleTestLocalDictation, projectState.isRecording, projectState.transcript]);
 
   // Toggle Animatic Playback (`isPlayingAnimatic`)
   const handleTogglePlayAnimatic = useCallback(() => {
@@ -739,16 +796,13 @@ export default function App() {
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null;
-      const isInputFocused =
+      const isTextInputFocused =
         target &&
         (target.tagName === 'INPUT' ||
           target.tagName === 'TEXTAREA' ||
-          target.tagName === 'SELECT' ||
-          target.tagName === 'VIDEO' || target.tagName === 'AUDIO' ||
-          target.tagName === 'BUTTON' || target.tagName === 'A' ||
           target.isContentEditable);
 
-      if (isInputFocused) return;
+      if (isTextInputFocused) return;
 
       const key = e.key.toLowerCase();
 
@@ -874,6 +928,7 @@ export default function App() {
           onExecuteVoiceCommand={handleExecuteVoiceCommand}
           onAddOrUpdateRule={handleAddOrUpdateRule}
           onToggleMute={handleToggleMute}
+          onTestLocalDictation={handleTestLocalDictation}
         />} shortcuts={<KeyboardShortcutsModal
         isOpen={isShortcutsModalOpen}
         onClose={() => setIsShortcutsModalOpen(false)}

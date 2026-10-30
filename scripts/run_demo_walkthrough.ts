@@ -23,7 +23,7 @@ async function main() {
   const browser = await chromium.launch({
     channel: process.env.PLAYWRIGHT_CHANNEL || 'msedge',
     headless: true,
-    args: ['--js-flags=--max-old-space-size=2048'],
+    args: ['--js-flags=--max-old-space-size=4096', '--no-sandbox'],
   });
 
   const posts: string[] = [];

@@ -5,9 +5,14 @@ import './voiceOverlay.css';
 import { SPRING_PRESS } from '../lib/ease';
 
 const COLORS = ['#b7b7b7', '#ffffff', '#252525'] as const;
-type Props = { open: boolean; onOpenChange: (open: boolean) => void; onType: () => void };
+type Props = {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onType: () => void;
+  onTranscript?: (transcript: string) => void;
+};
 
-/** Persistent entry to voice. The mic test is local metering, not transcription. */
+/** Persistent entry to voice with local metering. */
 export function VoiceOverlay({ open, onOpenChange }: Props) {
   const reduced = useReducedMotion();
   const [analyser, setAnalyser] = useState<AnalyserNode | null>(null);
@@ -108,7 +113,7 @@ export function VoiceOverlay({ open, onOpenChange }: Props) {
         </motion.div>
       </motion.button>
       <span id="voice-orb-status" className="sr-only" role="status">
-        {error || (renderError ? 'Orb unavailable' : pending ? 'Waiting for microphone permission' : analyser ? 'Microphone on. Local visualization only; transcription is not connected.' : 'Microphone off')}
+        {error || (renderError ? 'Orb unavailable' : pending ? 'Waiting for microphone permission' : analyser ? 'Microphone on. Local audio meter active.' : 'Microphone off')}
       </span>
     </div>
   );
