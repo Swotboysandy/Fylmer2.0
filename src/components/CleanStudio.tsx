@@ -68,6 +68,19 @@ export function CleanStudio(p: Props) {
     [focusDirection, setFocusDirection] = useState(false),
     [inspect, setInspect] = useState(false);
 
+  const handleSimulateVoice = (sampleText: string) => {
+    setVoiceNoticeText('Simulating voice input stream...');
+    void speechRecognitionService.simulateLocalSpeech(sampleText, {
+      onResult: (text, isFinal) => {
+        setCommand(text);
+        if (isFinal) {
+          setVoiceNoticeText(`Simulated: "${text}"`);
+        }
+      },
+      onStateChange: (listening) => setIsDictating(listening),
+    });
+  };
+
   const handleToggleVoiceDictation = () => {
     if (isDictating || speechRecognitionService.isListening()) {
       speechRecognitionService.stopListening();
@@ -93,7 +106,16 @@ export function CleanStudio(p: Props) {
       },
       onError: (err) => {
         setIsDictating(false);
-        setVoiceNoticeText(err);
+        if (err.includes('network') || err.includes('unreachable')) {
+          setVoiceNoticeText('Browser cloud voice unreachable (offline). Running local sample dictation...');
+          handleSimulateVoice(
+            hasStory
+              ? 'Fix continuity mismatch in Shot 2 using SAM 3.1'
+              : 'I am holding a blue cup in my kitchen. The walls dissolve into an ocean, but the cup stays exactly the same.'
+          );
+        } else {
+          setVoiceNoticeText(err);
+        }
       },
       onStateChange: (listening) => {
         setIsDictating(listening);
@@ -106,19 +128,6 @@ export function CleanStudio(p: Props) {
     if (!started) {
       setVoiceNoticeText('Microphone access could not start. Try simulated voice test.');
     }
-  };
-
-  const handleSimulateVoice = (sampleText: string) => {
-    setVoiceNoticeText('Simulating voice input stream...');
-    void speechRecognitionService.simulateLocalSpeech(sampleText, {
-      onResult: (text, isFinal) => {
-        setCommand(text);
-        if (isFinal) {
-          setVoiceNoticeText(`Simulated: "${text}"`);
-        }
-      },
-      onStateChange: (listening) => setIsDictating(listening),
-    });
   };
   const input = useRef<HTMLDivElement>(null),
     reduced = useReducedMotion();

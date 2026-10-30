@@ -613,8 +613,13 @@ export default function App() {
           }
         },
         onError: (err) => {
-          announceStatus(err);
           setProjectState((prev) => ({ ...prev, isRecording: false }));
+          if (err.includes('network') || err.includes('unreachable')) {
+            announceStatus('Browser cloud voice unreachable (offline). Running local sample dictation...');
+            void handleTestLocalDictation();
+          } else {
+            announceStatus(err);
+          }
         },
         onStateChange: (listening) => {
           setProjectState((prev) => ({ ...prev, isRecording: listening }));

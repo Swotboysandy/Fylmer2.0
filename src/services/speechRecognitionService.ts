@@ -169,6 +169,8 @@ class SpeechRecognitionService {
           userMessage = 'Microphone permission was denied. Enable mic access or use local voice simulation.';
         } else if (event.error === 'no-speech') {
           userMessage = 'No speech detected. Please speak closer to your microphone.';
+        } else if (event.error === 'network') {
+          userMessage = 'Browser cloud voice recognition unreachable (network). Switching to local offline dictation.';
         }
         this.currentOptions?.onError?.(userMessage);
       };
