@@ -510,7 +510,7 @@ export default function App() {
     async (commandText: string) => {
       if (!commandText.trim()) return;
       if (!projectState.shots.length) {
-        await handleRebuildFromTranscript(false, commandText.trim());
+        await handleRebuildFromTranscript(true, commandText.trim());
         return;
       }
       const lower = commandText.toLowerCase();

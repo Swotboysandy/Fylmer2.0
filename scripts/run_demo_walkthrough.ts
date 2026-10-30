@@ -23,6 +23,7 @@ async function main() {
   const browser = await chromium.launch({
     channel: process.env.PLAYWRIGHT_CHANNEL || 'msedge',
     headless: true,
+    args: ['--js-flags=--max-old-space-size=2048'],
   });
 
   const posts: string[] = [];
@@ -71,11 +72,15 @@ async function main() {
     await page.screenshot({ path: path.join(evidenceDir, '03_shot2_mismatch_alert.png') });
 
     console.log('[Demo Walkthrough] Step 4: Applying SAM 3.1 Continuity Fix...');
-    const fixBtn = page.getByRole('button', { name: /Apply SAM 3\.1 fix/i }).first();
+    const fixBtn = page.getByRole('button', { name: /Apply SAM 3\.1 Recolor/i }).first();
     if (await fixBtn.count()) {
       await fixBtn.click();
     } else {
-      await page.keyboard.press('y');
+      // Or click the one-click direction suggestion 'Fix shot 2'
+      const fixShot2Btn = page.getByRole('button', { name: 'Fix shot 2', exact: true });
+      if (await fixShot2Btn.count()) {
+        await fixShot2Btn.click();
+      }
     }
     await page.waitForTimeout(1500);
     await page.screenshot({ path: path.join(evidenceDir, '04_shot2_repaired_sam3.png') });
@@ -149,10 +154,10 @@ async function main() {
 
     console.log(`[Demo Walkthrough] Offline verification: ${posts.length} POST requests, ${errors.length} page errors.`);
     if (posts.length > 0) {
-      console.warn('[Demo Walkthrough] Warning: Unexpected POST requests during walkthrough:', posts);
+      throw new Error(`[Demo Walkthrough] Failure: Unexpected POST requests during walkthrough: ${posts.join(', ')}`);
     }
     if (errors.length > 0) {
-      console.warn('[Demo Walkthrough] Warning: Page errors encountered:', errors);
+      throw new Error(`[Demo Walkthrough] Failure: Page errors encountered: ${errors.join('; ')}`);
     }
 
     console.log('[Demo Walkthrough] Complete! All 10 high-resolution evidence slides captured.');
