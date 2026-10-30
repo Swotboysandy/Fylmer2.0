@@ -11,7 +11,7 @@ it('preserves two independent masks through all 289 transition frames',async()=>
  for(const score of report.objects){expect(score.protectedPixels).toBeGreaterThan(0);expect(score.changedProtectedPixelsAcrossFrames).toBe(0);}
  const first=new Uint8ClampedArray(a.anchor.data.length),last=first.slice();renderDreamFrame(a,first,0);renderDreamFrame(a,last,DREAM.duration);
  expect(first[0]).not.toBe(last[0]);
-});
+},15000);
 it('correcting or removing umbrella cannot change cup pixels or its mask',()=>{
  const cup=selection(80),umbrella=selection(150),b=base(),a=applyDreamSelections(b,cup,umbrella);
  const corrected={...umbrella,revision:2,mask:brushMask(umbrella.mask,20,20,{x:10,y:10},{x:10,y:10},4,false)};

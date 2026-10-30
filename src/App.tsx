@@ -18,6 +18,7 @@ import { VoiceTranscriptPanel } from './components/VoiceTranscriptPanel';
 import { StoryboardStage } from './components/StoryboardStage';
 import { AudioTimeline } from './components/AudioTimeline';
 import { ShotInspectorPanel } from './components/ShotInspectorPanel';
+import { StudioTour } from './components/StudioTour';
 import { KeyboardShortcutsModal } from './components/KeyboardShortcutsModal';
 
 export default function App() {
@@ -962,6 +963,7 @@ export default function App() {
           >
             Shortcuts [?]
           </button>
+
         </nav>
 
         {/* Zone 3: 1 primary action */}
@@ -975,6 +977,7 @@ export default function App() {
           </button>
         </div>
       </header>
+      <div className="px-6 py-2 border-b border-[#323A46] bg-[#16191E] text-[#E2E8F0] flex items-center gap-3"><StudioTour /><span className="text-xs">Learn selection, correction and dream export</span></div>
 
       {/* Persistent High-Contrast Screen Reader / Voice Status Dock (aria-live="polite") */}
       <div
