@@ -681,38 +681,72 @@ export function createApp(options: Options) {
           .toBuffer();
       }
 
-      let finalBuffer: Buffer;
+      // Bit-Exact 0-Drift Pixel Compositing:
+      // Direct raw buffer slice ensures 100% bit-exact retention of outside-mask pixels (0 drift).
+      const { data: basePixels, info: baseInfo } = await sharp(rawImageBuffer).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+      const { data: editPixels } = await sharp(editedBuffer).resize(baseInfo.width, baseInfo.height).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+      
+      const widthPx = baseInfo.width;
+      const heightPx = baseInfo.height;
+      const channels = baseInfo.channels; // 4 (RGBA)
+      let changedInside = 0;
+
       if (maskBase64) {
         const maskRaw = Buffer.from(maskBase64.replace(/^data:image\/\w+;base64,/, ''), 'base64');
-        const resizedMask = await sharp(maskRaw).resize(width, height).toColourspace('b-w').toBuffer();
-        
-        const cutoutEdited = await sharp(editedBuffer)
-          .resize(width, height)
-          .ensureAlpha()
-          .composite([{ input: resizedMask, blend: 'dest-in' }])
-          .toBuffer();
+        const { data: maskPixels, info: maskInfo } = await sharp(maskRaw)
+          .resize(widthPx, heightPx)
+          .toColourspace('b-w')
+          .raw()
+          .toBuffer({ resolveWithObject: true });
 
-        finalBuffer = await sharp(rawImageBuffer)
-          .composite([{ input: cutoutEdited, blend: 'over' }])
-          .png()
-          .toBuffer();
+        const totalPixels = widthPx * heightPx;
+        for (let i = 0; i < totalPixels; i++) {
+          const maskVal = maskPixels[i * maskInfo.channels];
+          if (maskVal > 128) {
+            changedInside++;
+            const offset = i * channels;
+            basePixels[offset] = editPixels[offset];
+            basePixels[offset + 1] = editPixels[offset + 1];
+            basePixels[offset + 2] = editPixels[offset + 2];
+            basePixels[offset + 3] = editPixels[offset + 3];
+          }
+        }
       } else if (bounds) {
         const { left, top, right, bottom } = bounds;
-        const regionW = Math.max(1, right - left);
-        const regionH = Math.max(1, bottom - top);
-        const croppedEdit = await sharp(editedBuffer).resize(width, height).extract({ left, top, width: regionW, height: regionH }).toBuffer();
-        finalBuffer = await sharp(rawImageBuffer)
-          .composite([{ input: croppedEdit, top, left }])
-          .png()
-          .toBuffer();
+        const x1 = Math.max(0, Math.min(widthPx, left));
+        const y1 = Math.max(0, Math.min(heightPx, top));
+        const x2 = Math.max(0, Math.min(widthPx, right));
+        const y2 = Math.max(0, Math.min(heightPx, bottom));
+
+        for (let y = y1; y < y2; y++) {
+          for (let x = x1; x < x2; x++) {
+            changedInside++;
+            const offset = (y * widthPx + x) * channels;
+            basePixels[offset] = editPixels[offset];
+            basePixels[offset + 1] = editPixels[offset + 1];
+            basePixels[offset + 2] = editPixels[offset + 2];
+            basePixels[offset + 3] = editPixels[offset + 3];
+          }
+        }
       } else {
-        finalBuffer = await sharp(editedBuffer).resize(width, height).png().toBuffer();
+        // Fallback: full frame replacement
+        editPixels.copy(basePixels);
+        changedInside = widthPx * heightPx;
       }
+
+      const finalBuffer = await sharp(basePixels, {
+        raw: {
+          width: widthPx,
+          height: heightPx,
+          channels,
+        },
+      }).png().toBuffer();
 
       res.json({
         editedImageUrl: `data:image/png;base64,${finalBuffer.toString('base64')}`,
         outsideDrift: 0,
         outsideDriftPercent: '0.00',
+        changedInside,
         verified: true,
         model: 'muse-image-1.0',
         provenance,
