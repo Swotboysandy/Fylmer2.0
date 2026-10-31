@@ -98,16 +98,16 @@ export const ShotInspectorPanel: React.FC<ShotInspectorPanelProps> = ({
       aria-label={`Inspector for Shot ${activeShot.shotNumber}`}
       className="w-full xl:w-[360px] shrink-0 bg-[#1E232B] border-2 border-[#323A46] rounded-lg p-5 flex flex-col gap-5"
     >
-      <LocalGenerationPanel isProcessing={isProcessing} shotId={activeShot.id} shotNumber={activeShot.shotNumber} initialPrompt={activeShot.promptDescription} onUseImage={onUseLocalImage} />
+      <details className="generation-disclosure"><summary>Generate new media</summary><LocalGenerationPanel isProcessing={isProcessing} shotId={activeShot.id} shotNumber={activeShot.shotNumber} initialPrompt={activeShot.promptDescription} onUseImage={onUseLocalImage} /></details>
       {/* Top Shot Status Header */}
       <div className="flex flex-col gap-3 border-b border-[#323A46] pb-4">
         <div className="flex items-center justify-between gap-2">
           <div>
             <span className="text-xs font-mono text-[#94A3B8] block">
-              ACTIVE INSPECTOR SELECTION
+              SELECTED SCENE
             </span>
             <h2 className="text-xl font-bold text-white">
-              Shot 0{activeShot.shotNumber} Diagnostics
+              Scene {activeShot.shotNumber}
             </h2>
           </div>
 
@@ -254,7 +254,7 @@ export const ShotInspectorPanel: React.FC<ShotInspectorPanelProps> = ({
         <div className="flex items-center justify-between">
           <h3 id="sam-studio-heading" className="text-base font-semibold text-white flex items-center gap-2">
             <Layers className="w-4 h-4 text-[#38BDF8]" aria-hidden="true" />
-            <span>SAM 3.1 Object Isolation</span>
+            <span>Anchor selection</span>
           </h3>
           <button
             type="button"

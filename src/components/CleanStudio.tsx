@@ -1,3 +1,4 @@
+import {DashboardLayout} from './DashboardLayout';
 import { Tabs as BeTabs, TabsList as BeTabsList, TabsTrigger as BeTabsTrigger, TabsContent as BeTabsContent } from './ui/beui-tabs';
 import { CreationComposer } from './CreationComposer';
 import { VoiceOverlay } from './VoiceOverlay';
@@ -32,6 +33,10 @@ import { speechRecognitionService } from '../services/speechRecognitionService';
 import type { StoryboardShot } from '../types/framelock';
 import './cleanStudio.css';
 type Props = {
+  storageStatus:string;
+  projectId:string; projectTitle:string; projects:{id:string;title:string}[];
+  onNewProject:()=>void; onOpenProject:(id:string)=>void; onRenameProject:(title:string)=>void;
+
   shots: StoryboardShot[];
   activeShot: StoryboardShot | null;
   transcript: string;
@@ -130,6 +135,7 @@ export function CleanStudio(p: Props) {
     return () => clearInterval(timer);
   }, []);
 
+  useEffect(()=>{setWorkspace('create');setCommand('');setVoiceOpen(false);setInspect(false);},[p.projectId]);
   const input = useRef<HTMLDivElement>(null),
     reduced = useReducedMotion();
   useEffect(() => {
@@ -157,18 +163,24 @@ export function CleanStudio(p: Props) {
         Skip to workspace
       </a>
       <header className="clean-header">
-        <a href="#" className="clean-brand">
+        <button type="button" onClick={()=>selectWorkspace('create')} aria-label="Go to creation workspace" className="clean-brand">
           <span className="brand-symbol">
             <Square size={18} />
           </span>
           anchorshot<span className="brand-dot">.</span>
-        </a>
-        {hasStory && <span className="project-label">
-          Untitled film <ChevronRight size={12} /> Workspace
-        </span>}
+        </button>
+        <nav className="project-navigation" aria-label="Project navigation">
+          <select aria-label="Switch project" value={p.projectId} disabled={p.processing||p.exporting} onChange={event=>p.onOpenProject(event.target.value)}>
+            {p.projects.map(project=><option key={project.id} value={project.id}>{project.title}</option>)}
+          </select>
+          {hasStory && <><ChevronRight size={12}/><button onClick={()=>selectWorkspace('create')}>Workspace</button><ChevronRight size={12}/><span aria-current="page">{workspace}</span></>}
+        </nav>
         <div className="header-actions">
+          <Button variant="outline" size="sm" disabled={p.processing||p.exporting} onClick={p.onNewProject}>New project</Button>
+          {hasStory && <details className="project-rename"><summary>Rename</summary><form onSubmit={event=>{event.preventDefault();const title=String(new FormData(event.currentTarget).get('title')||'').trim();if(title)p.onRenameProject(title);event.currentTarget.closest('details')?.removeAttribute('open');}}><input name="title" aria-label="Project name" defaultValue={p.projectTitle} key={p.projectTitle} maxLength={80} required/><Button size="sm" type="submit">Save name</Button></form></details>}
+
           <span className="local-label">
-            <i /> Local session
+            <i /> {p.storageStatus}
           </span>
           <StudioTour />
           <Button
@@ -200,19 +212,17 @@ export function CleanStudio(p: Props) {
         </div>
         <main id="clean-main">
           <TabsContent value="create" forceMount hidden={workspace !== 'create'}>
-            <div className={hasStory ? "creation-grid" : "creation-grid creation-empty"}>
+            <DashboardLayout active={hasStory}>
               <section className="director-column" aria-label="Direct your film">
+                {hasStory ? <div className="dashboard-direction-heading"><p className="eyebrow">DIRECTOR</p><h1>Shape the next scene.</h1><p className="intro-copy">Describe an edit, refine your script, or direct with your voice.</p></div> : <>
                 <p className="eyebrow">YOUR DIRECTOR'S CHAIR</p>
                 <h1>
-                  What would you
-                  <br />
-                  like to create?
+                  What would you like to create?
                 </h1>
                 <p className="intro-copy">
-                  A thought, a memory, a whole new world.
-                  <br />
-                  Start with what you can imagine.
+                  A thought, a memory, a whole new world. Start with what you can imagine.
                 </p>
+                </>}
                 <BeTabs variant="segment" value={inputMode} onValueChange={setInputMode} className="input-tabs">
                   <BeTabsList aria-label="Story input" wrapperClassName="mx-auto !w-fit">
                     <BeTabsTrigger value="describe">Describe a video</BeTabsTrigger>
@@ -301,7 +311,7 @@ export function CleanStudio(p: Props) {
                 <div className="section-heading">
                   <div>
                     <span className="eyebrow">THE CANVAS</span>
-                    <h2>Your story, taking shape.</h2>
+                    <h2>Your film</h2>
                   </div>
                   <span className="sample-badge">Sample storyboard</span>
                 </div>
@@ -407,35 +417,37 @@ export function CleanStudio(p: Props) {
                 </div>
                 {inspect && <div className="tools-surface">{p.inspector}</div>}
               </section>}
-            </div>
+              {hasStory && shot && <aside className="dashboard-details" aria-label="Selected scene details">
+                <p className="eyebrow">SCENE {String(shot.shotNumber).padStart(2, '0')}</p>
+                <h2>Scene details</h2>
+                <p className="dashboard-description">{shot.promptDescription}</p>
+                <dl className="dashboard-facts">
+                  <div><dt>Duration</dt><dd>{shot.durationSeconds}s</dd></div>
+                  <div><dt>Continuity</dt><dd>{shot.status}</dd></div>
+                  <div><dt>Revisions</dt><dd>{shot.revisions.length}</dd></div>
+                </dl>
+                {shot.discrepancyMessage && <p className="dashboard-issue">{shot.discrepancyMessage}</p>}
+                <Button variant="outline" className="w-full" onClick={() => setInspect(v => !v)}><SlidersHorizontal size={15}/>Edit selected scene</Button>
+                <Button variant="ghost" className="w-full" onClick={() => selectWorkspace('review')}>Review continuity<ArrowUpRight size={14}/></Button>
+                <Button variant="outline" className="w-full mt-4" onClick={() => selectWorkspace('dream')}>Dream transitions<ArrowUpRight size={14}/></Button>
+                <p className="dashboard-local">Local sample project · {p.shots.length} scenes · {p.duration.toFixed(1)}s</p>
+              </aside>}
+            </DashboardLayout>
           </TabsContent>
           <TabsContent value="dream" forceMount hidden={workspace !== 'dream'}>
-            <div className="focused-workspace">
-              <p className="eyebrow">CHANGE THE WORLD. KEEP YOUR ANCHORS.</p>
-              <h1>Some things stay with you.</h1>
-              <p className="intro-copy">
-                Select your cup and umbrella. Let the kitchen become an ocean.
-              </p>
-              <div className="tools-surface dream-surface">
-                <DreamTransitionPanel />
-              </div>
-            </div>
+            <DashboardLayout active>
+              <section className="workspace-guide"><p className="eyebrow">DREAM</p><h1>Build your transition.</h1><p>Choose the worlds, select what stays, then preview the change.</p><ol><li>Select your source images</li><li>Correct each anchor mask</li><li>Preview and verify protection</li><li>Export your transition</li></ol><Button variant="outline" onClick={()=>selectWorkspace('create')}>Back to film</Button></section>
+              <section className="tools-surface unified-tools dream-surface" aria-label="Dream editing workspace">{p.projects.map(project=><div key={project.id} hidden={project.id!==p.projectId}><DreamTransitionPanel projectId={project.id} /></div>)}</section>
+              <aside className="workspace-guide"><p className="eyebrow">ANCHOR PROTECTION</p><h2>Keep the details that matter.</h2><p>Cup and umbrella use separate masks. Review both selections before applying them.</p><p>Use the local verification report to check protected pixels across the transition.</p><Button variant="outline" onClick={()=>selectWorkspace('review')}>Review your scenes</Button></aside>
+            </DashboardLayout>
           </TabsContent>
           <TabsContent value="review" forceMount hidden={workspace !== 'review'}>
-            <div className="focused-workspace">
-              <p className="eyebrow">THE DETAILS THAT MATTER</p>
-              <h1>Keep your story consistent.</h1>
-              <p className="intro-copy">
-                Review selected shots, adjust continuity rules, and inspect local results.
-              </p>
-              <Button onClick={p.onAudit}>
-                Review sequence <Check size={15} />
-              </Button>
-              <div className="review-layout tools-surface">
-                {workspace === 'review' && p.controls}
-                {workspace === 'review' && p.inspector}
-              </div>
-            </div>
+            <DashboardLayout active>
+              <section className="workspace-guide"><p className="eyebrow">REVIEW</p><h1>Continuity review.</h1><p>Select a scene to inspect its anchors, corrections and revision history.</p><Button onClick={p.onAudit} disabled={p.processing}>Review sequence<Check size={15}/></Button>
+              <div className="review-scene-list">{p.shots.map(scene=><Button key={scene.id} variant="ghost" className="review-scene" aria-pressed={scene.id===shot?.id} onClick={()=>p.onSelect(scene.id)}><img src={scene.currentImageUrl} alt=""/><span>Scene {scene.shotNumber}<small>{scene.status} · {scene.durationSeconds}s</small></span></Button>)}</div></section>
+              <section className="tools-surface unified-tools" aria-label="Scene review tools">{workspace==='review' && p.inspector}</section>
+              <aside className="workspace-guide"><p className="eyebrow">PROJECT</p><h2>Story &amp; rules</h2><p>Your script and continuity rules guide each scene. Open project controls to change the sequence or edit rules.</p><details className="project-controls"><summary>Project controls</summary><div className="tools-surface unified-tools">{workspace==='review' && p.controls}</div></details><Button variant="outline" onClick={()=>selectWorkspace('create')}>Back to film</Button></aside>
+            </DashboardLayout>
           </TabsContent>
         </main>
       </Tabs>
