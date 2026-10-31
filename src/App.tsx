@@ -171,7 +171,7 @@ export default function App() {
 
       const mismatchShot = shots.find((s) => s.status === 'mismatch');
 
-      // Auto-mount completed video into canvas preview if available
+      // Auto-mount video into canvas preview across all shots, or trigger background generation
       try {
         const jobsRes = await fetch('/api/local-ai/jobs');
         if (jobsRes.ok) {
@@ -180,22 +180,60 @@ export default function App() {
             ? jobsData.find((j: any) => j.status === 'completed' && j.kind === 'video')
             : null;
           if (completedVideo) {
-            const targetIdx = mismatchShot ? shots.findIndex((s) => s.id === mismatchShot.id) : 1;
-            if (targetIdx >= 0 && shots[targetIdx]) {
-              shots = shots.map((s, idx) =>
-                idx === targetIdx
-                  ? {
-                      ...s,
-                      videoUrl: `/api/local-ai/jobs/${completedVideo.id}/assets/generated-video.mp4`,
-                      generatedJobId: completedVideo.id,
+            const videoUrl = `/api/local-ai/jobs/${completedVideo.id}/assets/generated-video.mp4`;
+            shots = shots.map((s) => ({
+              ...s,
+              videoUrl,
+              generatedJobId: completedVideo.id,
+            }));
+            orcaTracker.trackAction('generation', `Auto-mounted video into Canvas Storyboard (${shots.length} shots)`, {
+              jobId: completedVideo.id,
+              videoUrl,
+            });
+          }
+
+          // If no completed video yet, kick off background video rendering job
+          if (!completedVideo) {
+            fetch('/api/local-ai/jobs', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'x-anchorshot-local': '1',
+              },
+              body: JSON.stringify({
+                kind: 'video',
+                prompt: targetTranscript.slice(0, 500),
+                seed: 42,
+              }),
+            })
+              .then(async (r) => {
+                if (r.ok) {
+                  const newJob = await r.json();
+                  orcaTracker.trackAction('generation', 'Triggered background video generation job', { jobId: newJob.id });
+                  const pollInterval = setInterval(async () => {
+                    try {
+                      const checkRes = await fetch(`/api/local-ai/jobs/${newJob.id}`);
+                      if (checkRes.ok) {
+                        const checkData = await checkRes.json();
+                        if (checkData.status === 'completed') {
+                          clearInterval(pollInterval);
+                          const newVideoUrl = `/api/local-ai/jobs/${newJob.id}/assets/generated-video.mp4`;
+                          setProjectState((p) => ({
+                            ...p,
+                            shots: p.shots.map((shot) => ({ ...shot, videoUrl: newVideoUrl, generatedJobId: newJob.id })),
+                          }));
+                          orcaTracker.trackAction('generation', 'Background video generated and auto-mounted into storyboard', { videoUrl: newVideoUrl });
+                        } else if (checkData.status === 'failed' || checkData.status === 'cancelled') {
+                          clearInterval(pollInterval);
+                        }
+                      }
+                    } catch {
+                      clearInterval(pollInterval);
                     }
-                  : s
-              );
-              orcaTracker.trackAction('generation', `Auto-mounted video into Canvas Shot ${shots[targetIdx].shotNumber}`, {
-                jobId: completedVideo.id,
-                videoUrl: `/api/local-ai/jobs/${completedVideo.id}/assets/generated-video.mp4`,
-              });
-            }
+                  }, 3000);
+                }
+              })
+              .catch(() => {});
           }
         }
       } catch {

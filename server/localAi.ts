@@ -137,6 +137,85 @@ export function createLocalAi(root: string, launch = spawn) {
         !Number.isInteger(seed) || seed < 0 || seed > 2147483647) {
       res.status(400).json({error: 'Choose image or video, a prompt of 1–1500 characters, and an integer seed from 0 to 2147483647.'}); return;
     }
+
+    const modalEndpoint = process.env.MODAL_VIDEO_ENDPOINT;
+    if (kind === 'video' && modalEndpoint) {
+      const job: Job = {
+        id: randomUUID(),
+        kind,
+        prompt: prompt.trim(),
+        seed,
+        status: 'running',
+        message: 'Rendering on Modal Cloud GPU (A10G)…',
+        createdAt: new Date().toISOString(),
+      };
+      const folder = path.join(output, job.id);
+      mkdirSync(folder);
+      jobs.set(job.id, job);
+      save(job);
+
+      // Asynchronously invoke Modal A10G Serverless Endpoint
+      (async () => {
+        try {
+          const modalRes = await fetch(modalEndpoint, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ prompt: job.prompt, seed }),
+          });
+          if (!modalRes.ok) throw new Error(`Modal status ${modalRes.status}: ${await modalRes.text()}`);
+          const buffer = Buffer.from(await modalRes.arrayBuffer());
+          writeFileSync(path.join(folder, 'generated-video.mp4'), buffer);
+          const report = {
+            status: 'passed',
+            pipeline: 'modal-a10g-diffusers',
+            endpoint: modalEndpoint,
+            prompt: job.prompt,
+            generatedAt: new Date().toISOString(),
+          };
+          writeFileSync(path.join(folder, 'inference-report.json'), JSON.stringify(report, null, 2));
+          job.report = report;
+          job.status = 'completed';
+          job.message = 'Generated on Modal Cloud GPU (A10G). Ready for preview.';
+          save(job);
+        } catch (err: any) {
+          // If Modal fails or times out, fall back to local GPU pipeline
+          if (requirements.every(p => existsSync(p))) {
+            job.message = `Modal fallback (${err.message}). Rendering on local GPU…`;
+            save(job);
+            const child = launch(python, ['-u', path.join(root, 'scripts/run_local_ai.py'), kind, '--prompt', job.prompt,
+              '--seed', String(seed), '--output', folder], {cwd: root, windowsHide: true, shell: false});
+            active = {job, child};
+            let localLog = '';
+            const timer = setTimeout(() => stop('Stopped after 10 minutes. Check local GPU availability and retry.'), 600000);
+            child.stdout?.on('data', chunk => { localLog = (localLog + chunk.toString()).slice(-8000); });
+            child.stderr?.on('data', chunk => { localLog = (localLog + chunk.toString()).slice(-8000); });
+            child.on('close', code => {
+              clearTimeout(timer);
+              writeFileSync(path.join(folder, 'worker.log'), localLog);
+              if (job.status !== 'cancelled') {
+                if (code === 0 && existsSync(path.join(folder, 'generated-video.mp4'))) {
+                  job.status = 'completed';
+                  job.message = 'Generated on local GPU. Review visual quality.';
+                } else {
+                  job.status = 'failed';
+                  job.error = `Generation failed (${code}).`;
+                }
+              }
+              save(job);
+              active = undefined;
+            });
+          } else {
+            job.status = 'failed';
+            job.error = err.message || 'Modal cloud generation failed.';
+            save(job);
+          }
+        }
+      })();
+
+      res.status(202).json(job);
+      return;
+    }
+
     if (active) { res.status(409).json({error: 'Another GPU job is still running. Wait or cancel it.'}); return; }
     if (!requirements.every(p => existsSync(p))) { res.status(503).json({error: 'Local models are not installed. Run scripts/setup_local_ai.ps1 first.'}); return; }
     const job: Job = {id: randomUUID(), kind, prompt: prompt.trim(), seed, status: 'running', message: 'Loading local model…', createdAt: new Date().toISOString()};

@@ -376,6 +376,7 @@ export function CleanStudio(p: Props) {
                         src={shot.videoUrl}
                         controls
                         autoPlay
+                        muted
                         loop
                         playsInline
                         className="w-full h-full object-contain"
