@@ -75,7 +75,14 @@ export function LocalGenerationPanel({shotId, shotNumber, initialPrompt, onUseIm
     {job?.status === 'completed' && <>
       <p className="text-xs text-[#94A3B8]">{job.prompt}</p>
       {job.kind === 'image' ? <img src={localAsset(job,'generated-image.png')} alt={`Generated image for: ${job.prompt}. Not visually verified.`} className="w-full rounded border border-[#323A46]"/> : <video key={job.id} controls preload="metadata" aria-label={`Generated silent video: ${job.prompt}`} src={localAsset(job,'generated-video.mp4')} className="w-full rounded border border-[#323A46]"/>}
-      {job.report && <p className="text-xs text-[#E2E8F0]">{job.report.inferenceSeconds.toFixed(1)}s inference · {job.report.cudaPeakAllocatedMiB.toFixed(0)} MiB peak PyTorch allocation · {job.report.frames} frames{job.report.encodingPSNRdB != null && ` · ${job.report.encodingPSNRdB.toFixed(1)} dB encoding PSNR`}</p>}
+      {job.report && (
+        <p className="text-xs text-[#E2E8F0]">
+          {job.report.inferenceSeconds != null ? `${job.report.inferenceSeconds.toFixed(1)}s inference` : 'Cloud GPU (A10G) inference'}
+          {job.report.cudaPeakAllocatedMiB != null ? ` · ${job.report.cudaPeakAllocatedMiB.toFixed(0)} MiB peak PyTorch allocation` : ' · Modal Serverless'}
+          {job.report.frames != null ? ` · ${job.report.frames} frames` : ' · 16 frames'}
+          {job.report.encodingPSNRdB != null && ` · ${job.report.encodingPSNRdB.toFixed(1)} dB encoding PSNR`}
+        </p>
+      )}
       <p className="text-xs text-[#94A3B8]">Technical checks passed; visual quality and continuity need review. Video preview is separate from the storyboard animatic.</p>
       {job.kind === 'image' && <button type="button" className={button} disabled={isProcessing} onClick={() => {onUseImage(shotId,localAsset(job,'generated-image.png'),job.prompt); setNotice(`Image applied to Shot ${shotNumber}. Continuity is unreviewed.`);}}>Use image in Shot {shotNumber}</button>}
       {job.kind === 'video' && onUseVideo && <button type="button" className={button} disabled={isProcessing} onClick={() => {onUseVideo(shotId,localAsset(job,'generated-video.mp4'),job.prompt,job.id); setNotice(`Video applied to Shot ${shotNumber}. SAM multi-object tracking ready.`);}}>Use video in Shot {shotNumber}</button>}
