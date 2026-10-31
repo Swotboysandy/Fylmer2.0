@@ -4,7 +4,8 @@
  *
  * Supported Modes:
  * 1. Native Web Speech API (`window.SpeechRecognition` / `window.webkitSpeechRecognition`)
- *    - Zero cloud spend, zero data leakage, works in offline/local environments (Edge, Chrome)
+ *    - Zero API key spend; utilizes browser-provided speech recognition (cloud ASR in Chrome/Edge, or OS dictation)
+ *    - Automatically falls back to offline simulation on network/loopback connectivity errors
  * 2. Local Simulation Mode (`simulateLocalSpeech`)
  *    - Allows instant validation without requiring a physical microphone or browser permission grant
  * 3. Local Backend Gateway (`/api/muse/transcribe`)

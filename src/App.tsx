@@ -809,9 +809,22 @@ export default function App() {
 
       if (isTextInputFocused) return;
 
+      const isButtonOrLink =
+        target &&
+        (target.tagName === 'BUTTON' ||
+          target.tagName === 'A' ||
+          target.getAttribute('role') === 'button');
+      const isTab =
+        target &&
+        (target.getAttribute('role') === 'tab' ||
+          target.getAttribute('role') === 'tablist' ||
+          target.tagName === 'SELECT');
+
       const key = e.key.toLowerCase();
 
       if (e.code === 'Space') {
+        // Allow Space to natively activate focused buttons and links without hijacking animatic playback
+        if (isButtonOrLink) return;
         e.preventDefault();
         handleTogglePlayAnimatic();
       } else if (key === 'v') {
@@ -843,6 +856,8 @@ export default function App() {
         e.preventDefault();
         setIsShortcutsModalOpen((prev) => !prev);
       } else if (e.key === 'ArrowRight') {
+        // Allow native tab/select arrow navigation without switching storyboard shots
+        if (isTab) return;
         e.preventDefault();
         const idx = projectState.shots.findIndex((s) => s.id === projectState.activeShotId);
         const nextIdx = Math.min(projectState.shots.length - 1, idx + 1);
@@ -850,6 +865,7 @@ export default function App() {
           handleSelectShot(projectState.shots[nextIdx].id, true);
         }
       } else if (e.key === 'ArrowLeft') {
+        if (isTab) return;
         e.preventDefault();
         const idx = projectState.shots.findIndex((s) => s.id === projectState.activeShotId);
         const prevIdx = Math.max(0, idx - 1);

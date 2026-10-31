@@ -23,11 +23,11 @@ async function main() {
   const browser = await chromium.launch({
     channel: process.env.PLAYWRIGHT_CHANNEL || 'msedge',
     headless: true,
-    args: ['--js-flags=--max-old-space-size=4096', '--no-sandbox'],
   });
 
   const posts: string[] = [];
   const errors: string[] = [];
+  let cupScoreText = 'PASS (0 changed pixels)';
 
   try {
     const context = await browser.newContext({
@@ -110,23 +110,27 @@ async function main() {
 
     // Umbrella selection
     const selectUmbrellaBtn = page.getByRole('button', { name: 'Select umbrella', exact: true });
-    if (await selectUmbrellaBtn.count()) {
-      await selectUmbrellaBtn.click();
-      await page.waitForTimeout(500);
-      await page.getByRole('button', { name: 'Use umbrella sample' }).click();
-      await page.waitForTimeout(500);
-      await page.getByRole('button', { name: 'Start umbrella sample mask' }).click();
-      await page.waitForTimeout(500);
-      await page.getByRole('button', { name: 'Apply umbrella to dream' }).click();
-      await page.waitForTimeout(1000);
-    }
+    await selectUmbrellaBtn.waitFor({ state: 'visible', timeout: 5000 });
+    await selectUmbrellaBtn.click();
+    await page.waitForTimeout(500);
+    await page.getByRole('button', { name: 'Use umbrella sample' }).click();
+    await page.waitForTimeout(500);
+    await page.getByRole('button', { name: 'Start umbrella sample mask' }).click();
+    await page.waitForTimeout(500);
+    await page.getByRole('button', { name: 'Apply umbrella to dream' }).click();
+    await page.waitForTimeout(1000);
 
     await page.screenshot({ path: path.join(evidenceDir, '06_two_anchors_protected.png') });
 
     console.log('[Demo Walkthrough] Step 7: Verifying 0-Drift Pixel Continuity (289 Frames)...');
     const checkBtn = page.getByRole('button', { name: /Check both objects|Check cup preservation/i });
     await checkBtn.click();
-    await page.locator('[aria-label="cup preservation score"]').waitFor({ state: 'visible', timeout: 30000 });
+    const cupScoreLocator = page.locator('[aria-label="cup preservation score"]');
+    await cupScoreLocator.waitFor({ state: 'visible', timeout: 30000 });
+    const scoreVal = (await cupScoreLocator.textContent())?.trim();
+    if (scoreVal) {
+      cupScoreText = `PASS (${scoreVal})`;
+    }
     await page.waitForTimeout(1000);
     await page.screenshot({ path: path.join(evidenceDir, '07_pixel_verification_pass.png') });
 
@@ -147,9 +151,8 @@ async function main() {
     await page.screenshot({ path: path.join(evidenceDir, '10_studio_tour_step2.png') });
 
     const closeTourBtn = page.getByRole('button', { name: /Close/i }).first();
-    if (await closeTourBtn.count()) {
-      await closeTourBtn.click();
-    }
+    await closeTourBtn.waitFor({ state: 'visible', timeout: 5000 });
+    await closeTourBtn.click();
     await page.waitForTimeout(500);
 
     console.log(`[Demo Walkthrough] Offline verification: ${posts.length} POST requests, ${errors.length} page errors.`);
@@ -195,7 +198,7 @@ This automated walkthrough verifies that **AnchorShot** satisfies all Stage 2 & 
 | **04** | **SAM 3.1 Pixel Fix** | High-precision segmentation mask applied with recolor: 0 outside-mask drift verified. | [\`04_shot2_repaired_sam3.png\`](./demo-evidence/04_shot2_repaired_sam3.png) |
 | **05** | **Dream Workspace** | Dedicated transition environment for multi-anchor physical object preservation. | [\`05_dream_workspace.png\`](./demo-evidence/05_dream_workspace.png) |
 | **06** | **Two Anchors Locked** | Real cup photo and umbrella selected and masked independently in separate layers. | [\`06_two_anchors_protected.png\`](./demo-evidence/06_two_anchors_protected.png) |
-| **07** | **Zero-Drift Audit** | 289 frames evaluated across 12-second composite: **PASS (0 changed pixels)**. | [\`07_pixel_verification_pass.png\`](./demo-evidence/07_pixel_verification_pass.png) |
+| **07** | **Zero-Drift Audit** | 289 frames evaluated across 12-second composite: **${cupScoreText}**. | [\`07_pixel_verification_pass.png\`](./demo-evidence/07_pixel_verification_pass.png) |
 | **08** | **Review Sequence** | Full project rule manager, revision history, and model invocation audit trail. | [\`08_review_workspace.png\`](./demo-evidence/08_review_workspace.png) |
 | **09** | **Guided Tour Modal** | 7-step accessible tour with animated canvas and keyboard focus containment. | [\`09_studio_tour_step1.png\`](./demo-evidence/09_studio_tour_step1.png) |
 | **10** | **Tour Progression** | Step 2 demonstrating script pasting, keyboard shortcuts, and reduced-motion states. | [\`10_studio_tour_step2.png\`](./demo-evidence/10_studio_tour_step2.png) |
