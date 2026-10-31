@@ -26,6 +26,7 @@ export function LocalGenerationPanel({shotId, shotNumber, initialPrompt, onUseIm
         ]);
         if (disposed) return;
         setReady(health.ready); setBusy(Boolean(health.activeJobId)); setJobs(recent);
+        if (health.ready) setError(prev => (prev.includes('Local service unavailable') ? '' : prev));
         setSelected(previous => previous || recent[0]?.id || '');
       } catch (e) {
         if (!disposed) {setReady(false); setError(e instanceof Error ? e.message : 'Local service unavailable.');}

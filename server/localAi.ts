@@ -12,7 +12,10 @@ type Job = {id: string; kind: 'image'|'video'; prompt: string; seed: number; sta
 export function createLocalAi(root: string, launch = spawn) {
   const runtime = path.join(root, '.artifacts/local-ai');
   const output = path.join(runtime, 'ui-jobs');
-  const python = path.join(runtime, 'venv/Scripts/python.exe');
+  const python = [
+    path.join(runtime, 'venv/python.exe'),
+    path.join(runtime, 'venv/Scripts/python.exe'),
+  ].find((p) => existsSync(p)) || path.join(runtime, 'venv/python.exe');
   mkdirSync(output, {recursive: true});
   const jobs = new Map<string, Job>();
   let active: {job: Job; child: ChildProcess} | undefined;
@@ -108,7 +111,10 @@ export function createLocalAi(root: string, launch = spawn) {
           if (!existsSync(path.join(folder, kind === 'image' ? 'generated-image.png' : 'generated-video.mp4'))) throw new Error('Generated media is missing.');
           job.report = report; job.status = 'completed'; job.message = 'Generated locally. Review visual quality.';
         } catch (error) {
-          job.status = 'failed'; job.error ||= error instanceof Error ? error.message : 'Local generation failed.';
+          job.status = 'failed';
+          job.error ||= (code !== 0 && !existsSync(path.join(folder, 'inference-report.json'))
+            ? `Worker process exited with code ${code}.${log ? ' ' + log.trim().slice(-500) : ''}`
+            : error instanceof Error ? error.message : 'Local generation failed.');
           job.message = 'Generation failed. No cloud fallback was used.';
         }
       }
