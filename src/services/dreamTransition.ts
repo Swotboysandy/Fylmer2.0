@@ -27,7 +27,10 @@ export function renderDreamFrame(a: DreamAssets, output: Uint8ClampedArray, seco
     for (let x = 0; x < w; x++) {
       const pixel = y * w + x, i = pixel * 4;
       if (a.mask[pixel]) {
-        output.set(fixed.subarray(i, i + 4), i);
+        output[i] = fixed[i];
+        output[i + 1] = fixed[i + 1];
+        output[i + 2] = fixed[i + 2];
+        output[i + 3] = fixed[i + 3];
         continue;
       }
       // A soft doorway-shaped reveal expands into the full world, with a water ripple.
@@ -43,12 +46,21 @@ export function renderDreamFrame(a: DreamAssets, output: Uint8ClampedArray, seco
 }
 export function measureAnchor(a: DreamAssets, frame: Uint8ClampedArray) {
   let pixels = 0, changed = 0, maxChannelDelta = 0;
-  for (let p = 0; p < a.mask.length; p++) if (a.mask[p]) {
-    pixels++;
-    let delta = 0;
-    for (let c=0;c<4;c++) delta = Math.max(delta, Math.abs(frame[p*4+c] - a.anchor.data[p*4+c]));
-    if (delta) changed++;
-    maxChannelDelta = Math.max(maxChannelDelta, delta);
+  const fixed = a.anchor.data;
+  const mask = a.mask;
+  const len = mask.length;
+  for (let p = 0; p < len; p++) {
+    if (mask[p]) {
+      pixels++;
+      const i = p * 4;
+      const d0 = Math.abs(frame[i] - fixed[i]);
+      const d1 = Math.abs(frame[i + 1] - fixed[i + 1]);
+      const d2 = Math.abs(frame[i + 2] - fixed[i + 2]);
+      const d3 = Math.abs(frame[i + 3] - fixed[i + 3]);
+      const delta = Math.max(d0, d1, d2, d3);
+      if (delta) changed++;
+      if (delta > maxChannelDelta) maxChannelDelta = delta;
+    }
   }
   return {protectedPixels: pixels, changedProtectedPixels: changed, maxChannelDelta};
 }
@@ -93,7 +105,7 @@ export async function verifyDream(a: DreamAssets, reduced = false, signal?: Abor
     const start = performance.now(); renderDreamFrame(a,frame,i/DREAM.fps,reduced); timings.push(performance.now()-start);
     const m = measureAnchor(a,frame); drift += m.changedProtectedPixels; maxDelta=Math.max(maxDelta,m.maxChannelDelta);
     a.anchors?.forEach((anchor,index)=>{const score=measureAnchor({...a,mask:anchor.mask},frame);objects[index].changedProtectedPixelsAcrossFrames+=score.changedProtectedPixels;objects[index].maxChannelDelta=Math.max(objects[index].maxChannelDelta,score.maxChannelDelta);});
-    if (i%12===0) await new Promise(r=>setTimeout(r,0));
+    if (i % 6 === 0) await new Promise((r) => setTimeout(r, 0));
   }
   timings.sort((a,b)=>a-b);
   return {mode:'local-composite',backgrounds:'local SD1.5',mask:a.selectionInfo ? (a.selectionInfo.source === 'sam-3.1-photo' ? 'user-approved SAM photo mask' : 'user-approved photo mask; local manual selection; not SAM') : 'authored cup and shadow; not SAM',

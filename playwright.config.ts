@@ -12,6 +12,9 @@ export default defineConfig({
     headless: true,
     viewport: { width: 1440, height: 1080 },
     trace: 'retain-on-failure',
+    launchOptions: {
+      args: ['--disable-gpu', '--no-sandbox'],
+    },
   },
   webServer: {
     command: 'npm run dev',
