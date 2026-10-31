@@ -970,6 +970,8 @@ export default function App() {
 
   if(!storageReady)return <main className="p-8 text-white bg-black min-h-dvh" role="status">{storageStatus}</main>;
   return <CleanStudio
+    onSaveScene={(id,prompt,duration)=>{if(!prompt.trim()||!Number.isFinite(duration)||duration<0.5||duration>60)return;setCurrentTimeSeconds(0);setProjectState(previous=>({...previous,isPlayingAnimatic:false,shots:previous.shots.map(shot=>shot.id===id?{...shot,promptDescription:prompt,durationSeconds:duration,spokenDescription:`Scene ${shot.shotNumber}. ${prompt}`,status:prompt!==shot.promptDescription?'uncertain':shot.status}:shot)}));}}
+
     storageStatus={storageStatus}
     projectId={projectState.projectId} projectTitle={projectState.title}
     projects={[...sessionProjects.filter(item=>item.projectId!==projectState.projectId),projectState].map(item=>({id:item.projectId,title:item.title}))}
