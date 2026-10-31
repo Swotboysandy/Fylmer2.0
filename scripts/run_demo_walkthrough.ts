@@ -23,6 +23,7 @@ async function main() {
   const browser = await chromium.launch({
     channel: process.env.PLAYWRIGHT_CHANNEL || 'msedge',
     headless: true,
+    args: ['--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage'],
   });
 
   const posts: string[] = [];
@@ -41,7 +42,8 @@ async function main() {
     });
 
     console.log('[Demo Walkthrough] Step 1: Navigating to Clean Studio (Create tab)...');
-    await page.goto('http://127.0.0.1:4317/', { waitUntil: 'networkidle', timeout: 30000 });
+    await page.goto('http://127.0.0.1:4317/', { waitUntil: 'domcontentloaded', timeout: 30000 });
+    await page.getByRole('heading', { name: 'What would you like to create?' }).waitFor({ state: 'visible', timeout: 15000 });
     await page.waitForTimeout(1000);
     await page.screenshot({ path: path.join(evidenceDir, '01_clean_director_chair.png') });
 
