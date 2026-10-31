@@ -99,6 +99,7 @@ export function CleanStudio(p: Props) {
       interimResults: true,
       onResult: (text, isFinal) => {
         setCommand(text);
+        p.onTranscript(text);
         if (isFinal) {
           setVoiceNoticeText(`Heard: "${text}"`);
         }
