@@ -591,18 +591,9 @@ export default function App() {
         return;
       }
 
-      if (
-        lower.includes('emerald') ||
-        lower.includes('amber') ||
-        lower.includes('blue') ||
-        lower.includes('red') ||
-        lower.includes('purple') ||
-        lower.includes('white') ||
-        lower.includes('green') ||
-        lower.includes('yellow')
-      ) {
-        const colors = ['emerald', 'amber', 'blue', 'red', 'purple', 'white', 'green', 'yellow'];
-        const chosenColor = colors.find((c) => lower.includes(c)) || 'blue';
+      const colorMatch = lower.match(/\b(emerald|amber|blue|red|purple|white|green|yellow)\b/i);
+      if (colorMatch) {
+        const chosenColor = colorMatch[1].toLowerCase();
         const targetObj = projectState.rules[0]?.targetObject || 'cup';
         await handleAddOrUpdateRule(targetObj, chosenColor);
         return;
@@ -745,6 +736,7 @@ export default function App() {
       const clamped = Math.max(0, Math.min(totalDurationSeconds, timeSec));
       setCurrentTimeSeconds(clamped);
       speechService.playEarcon('scrub');
+      lastNarratedShotIdInAnimaticRef.current = null;
 
       let elapsed = 0;
       for (const shot of projectState.shots) {
@@ -874,14 +866,23 @@ export default function App() {
         handleApplyProposedFix(activeShot.id);
       } else if (key === 'b') {
         e.preventDefault();
-        handleToggleBeforeComparison();
+        if (!activeShot || (activeShot.revisions?.length ?? 0) <= 1) {
+          announceStatus('No previous revision available for before and after comparison.', false);
+        } else {
+          handleToggleBeforeComparison();
+        }
       } else if (key === 'm') {
         e.preventDefault();
-        setShowSamMaskOverlay((prev) => {
-          const next = !prev;
-          announceStatus(`SAM 3.1 segmentation overlay ${next ? 'enabled' : 'hidden'}.`, false);
-          return next;
-        });
+        const hasMask = Boolean(activeShot?.proposedFix?.mask);
+        if (!hasMask) {
+          announceStatus('No SAM 3.1 segmentation mask available for this shot.', false);
+        } else {
+          setShowSamMaskOverlay((prev) => {
+            const next = !prev;
+            announceStatus(`SAM 3.1 segmentation overlay ${next ? 'enabled' : 'hidden'}.`, false);
+            return next;
+          });
+        }
       } else if (key === 'a') {
         e.preventDefault();
         handleRunFullAudit();

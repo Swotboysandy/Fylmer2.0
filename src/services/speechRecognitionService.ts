@@ -173,6 +173,10 @@ class SpeechRecognitionService {
         } else if (event.error === 'network') {
           userMessage = 'Browser cloud voice recognition unreachable (network). Switching to local offline dictation.';
         }
+        if (event.error !== 'no-speech') {
+          this.isListeningState = false;
+          this.currentOptions?.onStateChange?.(false);
+        }
         this.currentOptions?.onError?.(userMessage);
       };
 

@@ -61,7 +61,6 @@ export function CleanStudio(p: Props) {
   const [workspace, setWorkspace] = useState('create'),
     [inputMode, setInputMode] = useState('describe'),
     [command, setCommand] = useState(''),
-    [voiceNotice, setVoiceNotice] = useState(false),
     [voiceNoticeText, setVoiceNoticeText] = useState<string | null>(null),
     [isDictating, setIsDictating] = useState(false),
     [voiceOpen, setVoiceOpen] = useState(false),
@@ -129,6 +128,16 @@ export function CleanStudio(p: Props) {
       setVoiceNoticeText('Microphone access could not start. Try simulated voice test.');
     }
   };
+
+  useEffect(() => {
+    const syncListening = () => {
+      const active = speechRecognitionService.isListening();
+      setIsDictating((prev) => (prev !== active ? active : prev));
+    };
+    const timer = setInterval(syncListening, 250);
+    return () => clearInterval(timer);
+  }, []);
+
   const input = useRef<HTMLDivElement>(null),
     reduced = useReducedMotion();
   useEffect(() => {
@@ -218,11 +227,6 @@ export function CleanStudio(p: Props) {
                     <BeTabsTrigger value="script">Paste a script</BeTabsTrigger>
                   </BeTabsList>
                   <BeTabsContent value="describe">
-                    {voiceNotice && (
-                      <p className="inline-notice" role="status">
-                        Live transcription is not connected. Your typed direction works locally.
-                      </p>
-                    )}
                     {voiceNoticeText && (
                       <div className="inline-notice flex items-center justify-between gap-2" role="status">
                         <span>{voiceNoticeText}</span>

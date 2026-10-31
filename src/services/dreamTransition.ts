@@ -100,11 +100,15 @@ export async function verifyDream(a: DreamAssets, reduced = false, signal?: Abor
   let drift = 0, maxDelta = 0;
   const objects=(a.anchors??[]).map(anchor=>({id:anchor.id,name:anchor.name,revision:anchor.revision,protectedPixels:anchor.mask.reduce((n,v)=>n+v,0),changedProtectedPixelsAcrossFrames:0,maxChannelDelta:0}));
   const count = DREAM.duration * DREAM.fps + 1;
+  const anchorViews = (a.anchors ?? []).map((anchor) => ({
+    ...a,
+    mask: anchor.mask,
+  }));
   for (let i=0;i<count;i++) {
     if (signal?.aborted) throw new DOMException('Cancelled', 'AbortError');
     const start = performance.now(); renderDreamFrame(a,frame,i/DREAM.fps,reduced); timings.push(performance.now()-start);
     const m = measureAnchor(a,frame); drift += m.changedProtectedPixels; maxDelta=Math.max(maxDelta,m.maxChannelDelta);
-    a.anchors?.forEach((anchor,index)=>{const score=measureAnchor({...a,mask:anchor.mask},frame);objects[index].changedProtectedPixelsAcrossFrames+=score.changedProtectedPixels;objects[index].maxChannelDelta=Math.max(objects[index].maxChannelDelta,score.maxChannelDelta);});
+    anchorViews.forEach((view,index)=>{const score=measureAnchor(view,frame);objects[index].changedProtectedPixelsAcrossFrames+=score.changedProtectedPixels;objects[index].maxChannelDelta=Math.max(objects[index].maxChannelDelta,score.maxChannelDelta);});
     if (i % 6 === 0) await new Promise((r) => setTimeout(r, 0));
   }
   timings.sort((a,b)=>a-b);
