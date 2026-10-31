@@ -13,5 +13,17 @@ export async function localRequest<T>(route: string, body?: unknown): Promise<T>
   if (!response.ok) throw new Error(value.error || 'Local request failed.');
   return value;
 }
-export const localAsset = (job: LocalJob, name: string) => `/api/local-ai/jobs/${job.id}/assets/${name}`;
+export const localAsset = (job: LocalJob | {id: string}, name: string) => `/api/local-ai/jobs/${job.id}/assets/${name}`;
 export const isLocalImage = (url: string) => url.startsWith('/api/local-ai/jobs/');
+export const isLocalVideo = (url: string) => url.startsWith('/api/local-ai/jobs/') && url.endsWith('.mp4');
+
+export async function detectLocalObjects(jobId: string) {
+  return localRequest<any[]>(`/jobs/${jobId}/detect-objects`, {});
+}
+
+export async function modifyLocalVideo(jobId: string, objectId: string, color: string) {
+  return localRequest<{action: string; targetObjectId: string; color: string; framesModified: number; totalPixelsRecolored: number; outsideDrift: number; verified: boolean}>(
+    `/jobs/${jobId}/modify`,
+    {objectId, color}
+  );
+}

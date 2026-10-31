@@ -2,9 +2,10 @@ import React, {useEffect, useState} from 'react';
 import {Cpu} from 'lucide-react';
 import {localAsset, localRequest, type LocalJob} from '../services/localGeneration';
 
-export function LocalGenerationPanel({shotId, shotNumber, initialPrompt, onUseImage, isProcessing}: {
+export function LocalGenerationPanel({shotId, shotNumber, initialPrompt, onUseImage, onUseVideo, isProcessing}: {
   shotId: string; shotNumber: number; initialPrompt: string; isProcessing: boolean;
   onUseImage: (shotId: string, imageUrl: string, prompt: string) => void;
+  onUseVideo?: (shotId: string, videoUrl: string, prompt: string, jobId: string) => void;
 }) {
   const [prompt, setPrompt] = useState(initialPrompt);
   const [seed, setSeed] = useState('42');
@@ -77,6 +78,7 @@ export function LocalGenerationPanel({shotId, shotNumber, initialPrompt, onUseIm
       {job.report && <p className="text-xs text-[#E2E8F0]">{job.report.inferenceSeconds.toFixed(1)}s inference · {job.report.cudaPeakAllocatedMiB.toFixed(0)} MiB peak PyTorch allocation · {job.report.frames} frames{job.report.encodingPSNRdB != null && ` · ${job.report.encodingPSNRdB.toFixed(1)} dB encoding PSNR`}</p>}
       <p className="text-xs text-[#94A3B8]">Technical checks passed; visual quality and continuity need review. Video preview is separate from the storyboard animatic.</p>
       {job.kind === 'image' && <button type="button" className={button} disabled={isProcessing} onClick={() => {onUseImage(shotId,localAsset(job,'generated-image.png'),job.prompt); setNotice(`Image applied to Shot ${shotNumber}. Continuity is unreviewed.`);}}>Use image in Shot {shotNumber}</button>}
+      {job.kind === 'video' && onUseVideo && <button type="button" className={button} disabled={isProcessing} onClick={() => {onUseVideo(shotId,localAsset(job,'generated-video.mp4'),job.prompt,job.id); setNotice(`Video applied to Shot ${shotNumber}. SAM multi-object tracking ready.`);}}>Use video in Shot {shotNumber}</button>}
       <div className="flex gap-3 text-sm text-[#38BDF8]"><a download href={localAsset(job,job.kind === 'image' ? 'generated-image.png' : 'generated-video.mp4')}>Download {job.kind}</a><a target="_blank" rel="noreferrer" href={localAsset(job,'inference-report.json')}>View measurements</a></div>
     </>}
   </section>;

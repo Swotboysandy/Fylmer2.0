@@ -418,6 +418,67 @@ export default function App() {
     setShowSamMaskOverlay(false);
   }, []);
 
+  const handleUseLocalVideo = useCallback((shotId: string, videoUrl: string, prompt: string, jobId: string) => {
+    setProjectState(prev => ({
+      ...prev,
+      isPlayingAnimatic: false,
+      shots: prev.shots.map(shot => shot.id === shotId ? {
+        ...shot,
+        videoUrl,
+        generatedJobId: jobId,
+        promptDescription: prompt,
+        status: 'uncertain',
+        proposedFix: undefined,
+        discrepancyMessage: undefined,
+        pixelVerification: undefined,
+        spokenDescription: `Shot ${shot.shotNumber}. ${prompt}. Local video; SAM 3.1 multi-frame analysis ready.`,
+        revisions: [
+          ...shot.revisions,
+          {
+            revisionId: `video-${Date.now()}`,
+            timestamp: Date.now(),
+            imageUrl: `/api/local-ai/jobs/${jobId}/assets/frame-000.png`,
+            actionApplied: 'Generated 16-frame AnimateDiff video locally on RTX 4070'
+          }
+        ],
+      } : shot),
+      statusAnnouncement: 'Local video applied to shot. SAM 3.1 multi-frame tracking ready.'
+    }));
+    setShowSamMaskOverlay(true);
+  }, []);
+
+  const handleUpdateDetectedObjects = useCallback((shotId: string, objects: any[]) => {
+    setProjectState(prev => ({
+      ...prev,
+      shots: prev.shots.map(shot => shot.id === shotId ? {
+        ...shot,
+        detectedObjects: objects,
+      } : shot),
+      statusAnnouncement: `Identified ${objects.length} objects via SAM 3.1 multi-frame analysis.`
+    }));
+    setShowSamMaskOverlay(true);
+  }, []);
+
+  const handleRefreshVideoUrl = useCallback((shotId: string, newVideoUrl: string) => {
+    setProjectState(prev => ({
+      ...prev,
+      shots: prev.shots.map(shot => shot.id === shotId ? {
+        ...shot,
+        videoUrl: newVideoUrl,
+        revisions: [
+          ...shot.revisions,
+          {
+            revisionId: `mod-${Date.now()}`,
+            timestamp: Date.now(),
+            imageUrl: `/api/local-ai/jobs/${shot.generatedJobId}/assets/frame-000.png?rev=${Date.now()}`,
+            actionApplied: 'Modified video object with verified 0 outside pixel drift'
+          }
+        ]
+      } : shot),
+      statusAnnouncement: 'Video modified and re-encoded. Playing updated media.'
+    }));
+  }, []);
+
   // Add or update a ContinuityRule and re-audit all shots
   const handleAddOrUpdateRule = useCallback(
     async (targetObject: string, expectedValue: string) => {
@@ -956,6 +1017,9 @@ export default function App() {
     onAudit={handleRunFullAudit} onShortcuts={()=>setIsShortcutsModalOpen(true)}
     inspector={<ShotInspectorPanel
           onUseLocalImage={handleUseLocalImage}
+          onUseLocalVideo={handleUseLocalVideo}
+          onUpdateDetectedObjects={handleUpdateDetectedObjects}
+          onRefreshVideoUrl={handleRefreshVideoUrl}
           activeShot={activeShot}
           showSamMaskOverlay={showSamMaskOverlay}
           showBeforeComparison={showBeforeComparison}

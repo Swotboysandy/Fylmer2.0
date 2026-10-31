@@ -6,7 +6,7 @@ import path from 'node:path';
 import type {Plugin} from 'vite';
 
 const ID = /^[a-f0-9-]{36}$/;
-const assets = new Set(['generated-image.png', 'generated-video.mp4', 'contact-sheet.png', 'inference-report.json']);
+const assets = new Set(['generated-image.png', 'generated-video.mp4', 'contact-sheet.png', 'inference-report.json', 'objects.json', 'modification-report.json']);
 type Job = {id: string; kind: 'image'|'video'; prompt: string; seed: number; status: string; message: string; createdAt: string; report?: Record<string, any>; error?: string};
 
 export function createLocalAi(root: string, launch = spawn) {
@@ -55,7 +55,7 @@ export function createLocalAi(root: string, launch = spawn) {
   });
   app.get('/jobs/:id/assets/:file', (req, res) => {
     const {id, file} = req.params;
-    if (!ID.test(id) || !jobs.has(id) || !assets.has(file) || jobs.get(id)?.status !== 'completed') {
+    if (!ID.test(id) || !jobs.has(id) || (!assets.has(file) && !/^frame-\d{3}\.png$/.test(file)) || jobs.get(id)?.status !== 'completed') {
       res.status(404).end(); return;
     }
     res.sendFile(path.resolve(output, id, file), {dotfiles: 'allow'}, (err) => {
@@ -75,6 +75,38 @@ export function createLocalAi(root: string, launch = spawn) {
     if (!active || active.job.id !== req.params.id) { res.status(409).json({error: 'This job is no longer running.'}); return; }
     const job = active.job; stop('Cancelled by you.'); res.json(job);
   });
+  app.post('/jobs/:id/detect-objects', (req, res) => {
+    const job = jobs.get(req.params.id);
+    if (!job || job.status !== 'completed') { res.status(404).json({error: 'Job not found or not completed.'}); return; }
+    const folder = path.join(output, job.id);
+    const objectsFile = path.join(folder, 'objects.json');
+    if (existsSync(objectsFile)) {
+      try { res.json(JSON.parse(readFileSync(objectsFile, 'utf8'))); return; } catch {}
+    }
+    const proc = launch(python, [path.join(root, 'scripts/detect_objects.py'), folder, '--prompt', job.prompt], {cwd: root, windowsHide: true});
+    proc.on('close', code => {
+      if (code === 0 && existsSync(objectsFile)) {
+        try { res.json(JSON.parse(readFileSync(objectsFile, 'utf8'))); return; } catch {}
+      }
+      res.status(500).json({error: 'Failed to extract objects from video frames.'});
+    });
+  });
+
+  app.post('/jobs/:id/modify', (req, res) => {
+    const job = jobs.get(req.params.id);
+    if (!job || job.status !== 'completed') { res.status(404).json({error: 'Job not found or not completed.'}); return; }
+    const {objectId = '0', color = 'emerald'} = req.body || {};
+    const folder = path.join(output, job.id);
+    const proc = launch(python, [path.join(root, 'scripts/modify_video.py'), folder, '--object-id', String(objectId), '--color', String(color)], {cwd: root, windowsHide: true});
+    proc.on('close', code => {
+      const reportFile = path.join(folder, 'modification-report.json');
+      if (code === 0 && existsSync(reportFile)) {
+        try { res.json(JSON.parse(readFileSync(reportFile, 'utf8'))); return; } catch {}
+      }
+      res.status(500).json({error: 'Failed to apply modification across video frames.'});
+    });
+  });
+
   app.post('/jobs', (req, res) => {
     const {kind, prompt, seed = 42} = req.body || {};
     if (!['image','video'].includes(kind) || typeof prompt !== 'string' || !prompt.trim() || prompt.length > 1500 ||

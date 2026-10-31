@@ -230,17 +230,29 @@ export const StoryboardStage: React.FC<StoryboardStageProps> = ({
             {reducedMotion && <span> / reduced motion: cuts</span>}
           </label>
           <div className="relative aspect-video w-full bg-[#121417] border-2 border-[#323A46] rounded overflow-hidden">
-            <SceneTransition
-              source={
-                showBeforeComparison && hasVerifiedRepair(activeShot)
-                  ? activeShot.originalImageUrl
-                  : activeShot.currentImageUrl
-              }
-              destination={nextShot?.currentImageUrl}
-              mask={activeShot.proposedFix?.mask?.maskBase64}
-              progress={transition.progress}
-              description={activeShot.spokenDescription}
-            />
+            {activeShot.videoUrl ? (
+              <video
+                controls
+                autoPlay
+                loop
+                muted
+                playsInline
+                src={activeShot.videoUrl}
+                className="w-full h-full object-contain"
+              />
+            ) : (
+              <SceneTransition
+                source={
+                  showBeforeComparison && hasVerifiedRepair(activeShot)
+                    ? activeShot.originalImageUrl
+                    : activeShot.currentImageUrl
+                }
+                destination={nextShot?.currentImageUrl}
+                mask={activeShot.proposedFix?.mask?.maskBase64}
+                progress={transition.progress}
+                description={activeShot.spokenDescription}
+              />
+            )}
 
             {/* SAM 3.1 Segmentation Mask & Bounding Box Overlay */}
             {showSamMaskOverlay && activeShot.proposedFix?.mask && (
@@ -358,14 +370,25 @@ export const StoryboardStage: React.FC<StoryboardStageProps> = ({
                   )}
                 </div>
 
-                {/* Storyboard Frame Canvas Image + Optional SAM 3.1 Segmentation Mask */}
+                {/* Storyboard Frame Canvas Image or Video + Optional SAM 3.1 Segmentation Mask */}
                 <div className="relative aspect-video w-full bg-[#121417] border border-[#323A46] rounded overflow-hidden">
-                  <img
-                    src={displayedImageUrl}
-                    alt={shot.spokenDescription}
-                    referrerPolicy="no-referrer"
-                    className="w-full h-full object-contain"
-                  />
+                  {shot.videoUrl ? (
+                    <video
+                      controls
+                      loop
+                      muted
+                      playsInline
+                      src={shot.videoUrl}
+                      className="w-full h-full object-contain"
+                    />
+                  ) : (
+                    <img
+                      src={displayedImageUrl}
+                      alt={shot.spokenDescription}
+                      referrerPolicy="no-referrer"
+                      className="w-full h-full object-contain"
+                    />
+                  )}
 
                   {isRepaired && (
                     <span className="absolute top-2.5 right-2.5 px-2 py-0.5 bg-[#0F172A]/90 border border-[#34D399] rounded text-[11px] font-mono font-bold text-[#34D399]">
@@ -373,31 +396,51 @@ export const StoryboardStage: React.FC<StoryboardStageProps> = ({
                     </span>
                   )}
 
-                  {showSamMaskOverlay && mask && (
+                  {showSamMaskOverlay && (mask || (shot.detectedObjects && shot.detectedObjects.length > 0)) && (
                     <>
-                      <img
-                        src={mask.maskBase64}
-                        alt=""
-                        aria-hidden="true"
-                        className="absolute inset-0 w-full h-full object-cover pointer-events-none opacity-75"
-                      />
-                      <div
-                        style={{
-                          left: `${mask.box.x}%`,
-                          top: `${mask.box.y}%`,
-                          width: `${mask.box.width}%`,
-                          height: `${mask.box.height}%`,
-                        }}
-                        className={`absolute pointer-events-none border-2 border-dashed rounded-xs ${
-                          isMismatch
-                            ? 'border-[#F59E0B] bg-[#F59E0B]/20'
-                            : 'border-[#38BDF8] bg-[#38BDF8]/15'
-                        }`}
-                      >
-                        <span className="absolute -top-6 left-0 px-1.5 py-0.5 bg-[#0F172A] border border-[#38BDF8] text-[11px] font-mono font-bold text-white whitespace-nowrap rounded-xs">
-                          {mask.maskRef}
-                        </span>
-                      </div>
+                      {mask && (
+                        <img
+                          src={mask.maskBase64}
+                          alt=""
+                          aria-hidden="true"
+                          className="absolute inset-0 w-full h-full object-cover pointer-events-none opacity-75"
+                        />
+                      )}
+                      {mask && (
+                        <div
+                          style={{
+                            left: `${mask.box.x}%`,
+                            top: `${mask.box.y}%`,
+                            width: `${mask.box.width}%`,
+                            height: `${mask.box.height}%`,
+                          }}
+                          className={`absolute pointer-events-none border-2 border-dashed rounded-xs ${
+                            isMismatch
+                              ? 'border-[#F59E0B] bg-[#F59E0B]/20'
+                              : 'border-[#38BDF8] bg-[#38BDF8]/15'
+                          }`}
+                        >
+                          <span className="absolute -top-6 left-0 px-1.5 py-0.5 bg-[#0F172A] border border-[#38BDF8] text-[11px] font-mono font-bold text-white whitespace-nowrap rounded-xs">
+                            {mask.maskRef}
+                          </span>
+                        </div>
+                      )}
+                      {shot.detectedObjects?.map((obj) => (
+                        <div
+                          key={obj.id}
+                          style={{
+                            left: `${(obj.bounds.left / 512) * 100}%`,
+                            top: `${(obj.bounds.top / 512) * 100}%`,
+                            width: `${((obj.bounds.right - obj.bounds.left) / 512) * 100}%`,
+                            height: `${((obj.bounds.bottom - obj.bounds.top) / 512) * 100}%`,
+                          }}
+                          className="absolute pointer-events-none border-2 border-dashed border-[#38BDF8] bg-[#38BDF8]/15 rounded-xs"
+                        >
+                          <span className="absolute -top-5 left-0 px-1.5 py-0.5 bg-[#0F172A] border border-[#38BDF8] text-[10px] font-mono font-bold text-white whitespace-nowrap rounded-xs">
+                            {obj.label} ({Math.round(obj.confidence * 100)}%)
+                          </span>
+                        </div>
+                      ))}
                     </>
                   )}
                 </div>

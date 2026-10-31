@@ -48,6 +48,20 @@ export interface StoryboardShot {
   currentImageUrl: string;
   originalImageUrl: string;
   status: RuleStatus;
+  videoUrl?: string;
+  generatedJobId?: string;
+  detectedObjects?: Array<{
+    id: string;
+    maskRef: string;
+    objectId: string;
+    label: string;
+    concept: string;
+    confidence: number;
+    bounds: { left: number; top: number; right: number; bottom: number };
+    rasterWidth: number;
+    rasterHeight: number;
+    rasterBase64: string;
+  }>;
   discrepancyMessage?: string;
   pixelVerification?: PixelVerificationReport;
   proposedFix?: {
