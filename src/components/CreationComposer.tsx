@@ -8,11 +8,23 @@ import {
 } from "./ui/prompt-input"
 import { Button } from "./ui/button"
 import { ArrowUp, Check, Mic, MoreHorizontal, Plus } from "lucide-react"
+import { clsx } from "clsx"
 
-type Props = { prompt: string; isLoading: boolean; setPrompt: (value: string) => void; onSubmit: (value: string) => void; onScript: () => void; onReview: () => void; onTools: () => void; onVoice: () => void; hasStory: boolean };
+type Props = {
+  prompt: string;
+  isLoading: boolean;
+  setPrompt: (value: string) => void;
+  onSubmit: (value: string) => void;
+  onScript: () => void;
+  onReview: () => void;
+  onTools: () => void;
+  onVoice: () => void;
+  hasStory: boolean;
+  isListening?: boolean;
+};
 
 // Upstream block structure/classes preserved. Demo handlers are replaced with app callbacks.
-function CreationComposer({prompt,isLoading,setPrompt,onSubmit,onScript,onReview,onTools,onVoice,hasStory}:Props) {
+function CreationComposer({prompt,isLoading,setPrompt,onSubmit,onScript,onReview,onTools,onVoice,hasStory,isListening = false}:Props) {
   const handleSubmit = () => {
     if (!prompt.trim() || isLoading) return;
     onSubmit(prompt.trim());
@@ -30,7 +42,8 @@ function CreationComposer({prompt,isLoading,setPrompt,onSubmit,onScript,onReview
       >
         <div className="flex flex-col">
           <PromptInputTextarea
-            aria-label="Describe your video or edit" placeholder="Describe your scene or an edit..."
+            aria-label="Describe your video or edit"
+            placeholder={isListening ? "Listening live... Speak your direction or click mic to stop" : "Describe your scene or an edit..."}
             className="min-h-[44px] pt-3 pl-4 text-base leading-[1.3] sm:text-base md:text-base"
           />
 
@@ -64,13 +77,19 @@ function CreationComposer({prompt,isLoading,setPrompt,onSubmit,onScript,onReview
               </PromptInputAction>
             </div>
             <div className="flex items-center gap-2">
-              <PromptInputAction tooltip="Voice input">
-                <Button onClick={onVoice} aria-label="Talk to Anchorshot"
-                  variant="outline"
+              <PromptInputAction tooltip={isListening ? "Stop voice dictation" : "Voice input"}>
+                <Button onClick={onVoice} aria-label={isListening ? "Stop voice dictation" : "Talk to Anchorshot"}
+                  aria-pressed={isListening}
+                  variant={isListening ? "default" : "outline"}
                   size="icon"
-                  className="size-9 rounded-full"
+                  className={clsx(
+                    "size-9 rounded-full transition-all duration-200",
+                    isListening
+                      ? "bg-white text-black hover:bg-neutral-200 border-2 border-white ring-2 ring-white/40"
+                      : ""
+                  )}
                 >
-                  <Mic size={18} />
+                  <Mic size={18} className={isListening ? "stroke-[2.5]" : ""} />
                 </Button>
               </PromptInputAction>
 

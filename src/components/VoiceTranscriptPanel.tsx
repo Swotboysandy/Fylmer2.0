@@ -18,6 +18,7 @@ interface VoiceTranscriptPanelProps {
   onExecuteVoiceCommand: (commandText: string) => void;
   onAddOrUpdateRule: (targetObject: string, expectedValue: string) => void;
   onToggleMute: () => void;
+  onTestLocalDictation?: () => void;
 }
 
 export const VoiceTranscriptPanel: React.FC<VoiceTranscriptPanelProps> = ({
@@ -35,6 +36,7 @@ export const VoiceTranscriptPanel: React.FC<VoiceTranscriptPanelProps> = ({
   onExecuteVoiceCommand,
   onAddOrUpdateRule,
   onToggleMute,
+  onTestLocalDictation,
 }) => {
   const [voiceCommandInput, setVoiceCommandInput] = useState('');
   const [newRuleObject, setNewRuleObject] = useState('cup');
@@ -199,6 +201,19 @@ export const VoiceTranscriptPanel: React.FC<VoiceTranscriptPanelProps> = ({
             [V]
           </kbd>
         </button>
+
+        {onTestLocalDictation && (
+          <div className="flex items-center justify-between text-xs font-mono text-[#94A3B8] px-1">
+            <span>Testing without microphone?</span>
+            <button
+              type="button"
+              onClick={onTestLocalDictation}
+              className="text-[#38BDF8] hover:text-[#7DD3FC] underline"
+            >
+              Test simulated voice
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Quick Multimodal Voice/Text Command Bar */}

@@ -68,6 +68,21 @@ export function DreamTransitionPanel() {
     } catch(e) {setError(e instanceof Error?e.message:'Operation failed.');}
     finally {setBusy(null);operation.current=null;}
   };
+  const updateSelections = (cup: CupSelection | null, second: CupSelection | null) => {
+    try {
+      const next = applyDreamSelections(original.current!, cup, second);
+      setSelection(cup);
+      setUmbrella(second);
+      setAssets(next);
+      setReport(null);
+      setOverlay(false);
+      setEditing(null);
+      seek(0);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to apply dream selections.');
+    }
+  };
+
   return <section aria-label="Kitchen to ocean dream study" className="bg-[#1E232B] border-2 border-[#323A46] rounded-lg overflow-hidden">
     <button type="button" aria-expanded={open} aria-controls="dream-study" disabled={Boolean(busy)||Boolean(editing)} onClick={()=>{setOpen(!open);setPlaying(false);}}
       className="w-full p-4 text-left flex flex-wrap items-center justify-between gap-3 text-white">
@@ -83,7 +98,7 @@ export function DreamTransitionPanel() {
       {assets && <>
         <div className="flex flex-wrap gap-2">
           <button type="button" className={button} disabled={Boolean(busy)||Boolean(editing)} onClick={()=>{setEditing('cup');setPlaying(false);setReport(null);}}>{selection?'Edit cup mask':'Select real cup'}</button>
-          {selection && <button type="button" className={button} disabled={Boolean(busy)||Boolean(editing)} onClick={()=>{setSelection(null);setAssets(applyDreamSelections(original.current!,null,umbrella));setReport(null);seek(0);}}>Restore illustrated cup</button>}
+          {selection && <button type="button" className={button} disabled={Boolean(busy)||Boolean(editing)} onClick={()=>updateSelections(null, umbrella)}>Restore illustrated cup</button>}
           {selection && (
             <span className="text-sm text-[#CBD5E1] inline-flex items-center gap-2">
               <span>{selection.source === 'sam-3.1-photo' ? '✨ SAM 3.1 cutout' : 'Approved photo mask'} · revision {selection.revision}</span>
@@ -97,11 +112,11 @@ export function DreamTransitionPanel() {
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <button type="button" className={button} disabled={Boolean(busy)||Boolean(editing)} onClick={()=>{setEditing('umbrella');setPlaying(false);setReport(null);}}>{umbrella?'Edit umbrella mask':'Select umbrella'}</button>
-          {umbrella && <><span className="text-sm text-white">Approved umbrella mask - revision {umbrella.revision}</span><button type="button" className={button} disabled={Boolean(busy)||Boolean(editing)} onClick={()=>{setUmbrella(null);setAssets(applyDreamSelections(original.current!,selection,null));setReport(null);seek(0);}}>Remove umbrella</button></>}
+          {umbrella && <><span className="text-sm text-white">Approved umbrella mask - revision {umbrella.revision}</span><button type="button" className={button} disabled={Boolean(busy)||Boolean(editing)} onClick={()=>updateSelections(selection, null)}>Remove umbrella</button></>}
         </div>
         {editing && <CupMaskEditor key={editing} objectKind={editing} initial={editing==='cup'?selection:umbrella} onCancel={()=>setEditing(null)} onApply={s=>{
           const cup=editing==='cup'?s:selection,second=editing==='umbrella'?s:umbrella;
-          const next=applyDreamSelections(original.current!,cup,second);setSelection(cup);setUmbrella(second);setAssets(next);setReport(null);setOverlay(false);setEditing(null);seek(0);
+          updateSelections(cup, second);
         }}/>}
 
 

@@ -11,6 +11,7 @@ import {
 } from './types/framelock';
 import { DIRECTOR_PRESETS, metaModelClient } from './services/metaModels';
 import { speechService } from './services/speechService';
+import { speechRecognitionService } from './services/speechRecognitionService';
 import {
   exportStoryboardAnimaticVideo,
   renderMuseStoryboardFrame,
@@ -505,75 +506,6 @@ export default function App() {
     }
   }, [projectState.shots, announceStatus]);
 
-  // Execute natural voice or text command (`muse-spark-1.3` intent router)
-  const handleExecuteVoiceCommand = useCallback(
-    async (commandText: string) => {
-      if (!commandText.trim()) return;
-      if (!projectState.shots.length) {
-        await handleRebuildFromTranscript(false, commandText.trim());
-        return;
-      }
-      const lower = commandText.toLowerCase();
-
-      if (lower.includes('fix')) {
-        // Check if a specific shot number was named, otherwise fix active or first mismatched shot
-        const shotMatch = lower.match(/shot\s*(\d+)/);
-        const targetShotNum = shotMatch ? parseInt(shotMatch[1], 10) : null;
-        const targetShot =
-          (targetShotNum
-            ? projectState.shots.find((s) => s.shotNumber === targetShotNum)
-            : projectState.shots.find((s) => s.status === 'mismatch')) || activeShot;
-
-        if (targetShot) {
-          await handleApplyProposedFix(targetShot.id);
-        } else {
-          announceStatus('All shots are already consistent.', true);
-        }
-        return;
-      }
-
-      if (lower.includes('narrate') || lower.includes('read') || lower.includes('describe')) {
-        const summary = projectState.shots.map((s) => s.spokenDescription).join(' ');
-        announceStatus(`Narrating full storyboard sequence: ${summary}`, true);
-        return;
-      }
-
-      if (
-        lower.includes('emerald') ||
-        lower.includes('amber') ||
-        lower.includes('blue') ||
-        lower.includes('red') ||
-        lower.includes('purple') ||
-        lower.includes('white')
-      ) {
-        const colors = ['emerald', 'amber', 'blue', 'red', 'purple', 'white'];
-        const chosenColor = colors.find((c) => lower.includes(c)) || 'blue';
-        const targetObj = projectState.rules[0]?.targetObject || 'cup';
-        await handleAddOrUpdateRule(targetObj, chosenColor);
-        return;
-      }
-
-      // Default: append to transcript and rebuild sequence
-      const updatedTranscript = `${projectState.transcript} ${commandText}`.trim();
-      await handleRebuildFromTranscript(false, updatedTranscript);
-    },
-    [
-      projectState.shots,
-      projectState.rules,
-      projectState.transcript,
-      activeShot,
-      handleApplyProposedFix,
-      handleAddOrUpdateRule,
-      handleRebuildFromTranscript,
-      announceStatus,
-    ]
-  );
-
-  // Offline mode must not substitute a demo command for recorded speech.
-  const handleToggleRecording = useCallback(() => {
-    announceStatus('Voice transcription is offline. Type your direction in Create or Review.');
-  }, [announceStatus]);
-
   // Toggle Animatic Playback (`isPlayingAnimatic`)
   const handleTogglePlayAnimatic = useCallback(() => {
     setProjectState((prev) => {
@@ -594,6 +526,163 @@ export default function App() {
       };
     });
   }, [currentTimeSeconds, totalDurationSeconds]);
+
+  // Execute natural voice or text command (`muse-spark-1.3` intent router)
+  const handleExecuteVoiceCommand = useCallback(
+    async (commandText: string) => {
+      const trimmed = commandText.trim();
+      if (!trimmed) return;
+      if (!projectState.shots.length) {
+        await handleRebuildFromTranscript(true, trimmed);
+        return;
+      }
+      // Normalize: lower case and clean trailing punctuation
+      const lower = trimmed.toLowerCase().replace(/[.,!?;:]+$/g, '');
+
+      // Directives: Playback
+      if (lower.startsWith('play') || lower.includes('start animatic') || lower === 'play sequence') {
+        if (!projectState.isPlayingAnimatic) handleTogglePlayAnimatic();
+        return;
+      }
+      if (lower.startsWith('stop') || lower.startsWith('pause')) {
+        if (projectState.isPlayingAnimatic) handleTogglePlayAnimatic();
+        return;
+      }
+
+      // Directives: Help & Shortcuts
+      if (lower.includes('help') || lower.includes('shortcut') || lower.includes('hotkey')) {
+        setIsShortcutsModalOpen(true);
+        announceStatus('Opened keyboard and voice shortcuts dialog.', false);
+        return;
+      }
+
+      // Directives: Audit
+      if (lower.includes('audit') || lower.includes('check continuity')) {
+        await handleRunFullAudit();
+        return;
+      }
+
+      if (lower.includes('fix') || lower.includes('repair')) {
+        // Support numbers ("2", "two", "#2", etc.)
+        const numberWords: Record<string, number> = {
+          '1': 1, 'one': 1, '#1': 1,
+          '2': 2, 'two': 2, '#2': 2,
+          '3': 3, 'three': 3, '#3': 3,
+          '4': 4, 'four': 4, '#4': 4,
+        };
+        const shotMatch = lower.match(/(?:shot|#|\b)\s*(1|2|3|4|one|two|three|four)\b/i);
+        const targetShotNum = shotMatch ? numberWords[shotMatch[1].toLowerCase()] : null;
+        const targetShot =
+          (targetShotNum
+            ? projectState.shots.find((s) => s.shotNumber === targetShotNum)
+            : projectState.shots.find((s) => s.status === 'mismatch')) || activeShot;
+
+        if (targetShot) {
+          await handleApplyProposedFix(targetShot.id);
+        } else {
+          announceStatus('All shots are already consistent.', true);
+        }
+        return;
+      }
+
+      if (lower.includes('narrate') || lower.includes('read') || lower.includes('describe')) {
+        const summary = projectState.shots.map((s) => s.spokenDescription).join(' ');
+        announceStatus(`Narrating full storyboard sequence: ${summary}`, true);
+        return;
+      }
+
+      const colorMatch = lower.match(/\b(emerald|amber|blue|red|purple|white|green|yellow)\b/i);
+      if (colorMatch) {
+        const chosenColor = colorMatch[1].toLowerCase();
+        const targetObj = projectState.rules[0]?.targetObject || 'cup';
+        await handleAddOrUpdateRule(targetObj, chosenColor);
+        return;
+      }
+
+      // Default: append to transcript and rebuild sequence
+      const updatedTranscript = `${projectState.transcript} ${trimmed}`.trim();
+      await handleRebuildFromTranscript(false, updatedTranscript);
+    },
+    [
+      projectState.shots,
+      projectState.rules,
+      projectState.transcript,
+      projectState.isPlayingAnimatic,
+      activeShot,
+      handleApplyProposedFix,
+      handleAddOrUpdateRule,
+      handleRebuildFromTranscript,
+      handleTogglePlayAnimatic,
+      handleRunFullAudit,
+      announceStatus,
+    ]
+  );
+
+  const handleTestLocalDictation = useCallback(async () => {
+    announceStatus('Running local voice dictation test...');
+    const sample =
+      'Continuity Rule across all shots: the ceramic coffee cup must be blue. Shot 2 has a red cup discrepancy—segment the cup and recolor it to cobalt blue.';
+    await speechRecognitionService.simulateLocalSpeech(sample, {
+      onResult: (text, isFinal) => {
+        setProjectState((prev) => ({ ...prev, transcript: text }));
+        if (isFinal) {
+          announceStatus('Local voice test completed: transcript generated.', true);
+        }
+      },
+      onStateChange: (listening) => {
+        setProjectState((prev) => ({ ...prev, isRecording: listening }));
+      },
+    });
+  }, [announceStatus]);
+
+  // Start or stop real Speech-to-Text via Web Speech API (with local test fallback)
+  const handleToggleRecording = useCallback(() => {
+    if (speechRecognitionService.isListening() || projectState.isRecording) {
+      speechRecognitionService.stopListening();
+      setProjectState((prev) => ({ ...prev, isRecording: false }));
+      announceStatus('Voice capture stopped. Transcript updated.');
+      return;
+    }
+
+    if (speechRecognitionService.isSupported()) {
+      announceStatus('Listening for voice input... Speak now.');
+      const baseTranscript = projectState.transcript.trim();
+      const started = speechRecognitionService.startListening({
+        continuous: true,
+        interimResults: true,
+        onResult: (text, isFinal) => {
+          // Replace with current utterance relative to base snapshot to avoid interim duplication
+          setProjectState((prev) => ({
+            ...prev,
+            transcript: baseTranscript ? `${baseTranscript} ${text}` : text,
+          }));
+          if (isFinal) {
+            announceStatus(`Recorded voice: "${text}"`, false);
+          }
+        },
+        onError: (err) => {
+          setProjectState((prev) => ({ ...prev, isRecording: false }));
+          if (err.includes('network') || err.includes('unreachable')) {
+            announceStatus('Browser cloud voice unreachable (offline). Running local sample dictation...');
+            void handleTestLocalDictation();
+          } else {
+            announceStatus(err);
+          }
+        },
+        onStateChange: (listening) => {
+          setProjectState((prev) => ({ ...prev, isRecording: listening }));
+        },
+      });
+
+      if (!started) {
+        announceStatus('Could not access microphone. Try local sample dictation.');
+        setProjectState((prev) => ({ ...prev, isRecording: false }));
+      }
+    } else {
+      announceStatus('Web Speech API is unavailable in this browser. Running local test dictation.');
+      void handleTestLocalDictation();
+    }
+  }, [announceStatus, handleTestLocalDictation, projectState.isRecording, projectState.transcript]);
 
   // Animatic Timeline Clock Effect
   useEffect(() => {
@@ -647,6 +736,7 @@ export default function App() {
       const clamped = Math.max(0, Math.min(totalDurationSeconds, timeSec));
       setCurrentTimeSeconds(clamped);
       speechService.playEarcon('scrub');
+      lastNarratedShotIdInAnimaticRef.current = null;
 
       let elapsed = 0;
       for (const shot of projectState.shots) {
@@ -739,20 +829,30 @@ export default function App() {
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null;
-      const isInputFocused =
+      const isTextInputFocused =
         target &&
         (target.tagName === 'INPUT' ||
           target.tagName === 'TEXTAREA' ||
-          target.tagName === 'SELECT' ||
-          target.tagName === 'VIDEO' || target.tagName === 'AUDIO' ||
-          target.tagName === 'BUTTON' || target.tagName === 'A' ||
           target.isContentEditable);
 
-      if (isInputFocused) return;
+      if (isTextInputFocused) return;
+
+      const isButtonOrLink =
+        target &&
+        (target.tagName === 'BUTTON' ||
+          target.tagName === 'A' ||
+          target.getAttribute('role') === 'button');
+      const isTab =
+        target &&
+        (target.getAttribute('role') === 'tab' ||
+          target.getAttribute('role') === 'tablist' ||
+          target.tagName === 'SELECT');
 
       const key = e.key.toLowerCase();
 
       if (e.code === 'Space') {
+        // Allow Space to natively activate focused buttons and links without hijacking animatic playback
+        if (isButtonOrLink) return;
         e.preventDefault();
         handleTogglePlayAnimatic();
       } else if (key === 'v') {
@@ -766,14 +866,23 @@ export default function App() {
         handleApplyProposedFix(activeShot.id);
       } else if (key === 'b') {
         e.preventDefault();
-        handleToggleBeforeComparison();
+        if (!activeShot || (activeShot.revisions?.length ?? 0) <= 1) {
+          announceStatus('No previous revision available for before and after comparison.', false);
+        } else {
+          handleToggleBeforeComparison();
+        }
       } else if (key === 'm') {
         e.preventDefault();
-        setShowSamMaskOverlay((prev) => {
-          const next = !prev;
-          announceStatus(`SAM 3.1 segmentation overlay ${next ? 'enabled' : 'hidden'}.`, false);
-          return next;
-        });
+        const hasMask = Boolean(activeShot?.proposedFix?.mask);
+        if (!hasMask) {
+          announceStatus('No SAM 3.1 segmentation mask available for this shot.', false);
+        } else {
+          setShowSamMaskOverlay((prev) => {
+            const next = !prev;
+            announceStatus(`SAM 3.1 segmentation overlay ${next ? 'enabled' : 'hidden'}.`, false);
+            return next;
+          });
+        }
       } else if (key === 'a') {
         e.preventDefault();
         handleRunFullAudit();
@@ -784,6 +893,8 @@ export default function App() {
         e.preventDefault();
         setIsShortcutsModalOpen((prev) => !prev);
       } else if (e.key === 'ArrowRight') {
+        // Allow native tab/select arrow navigation without switching storyboard shots
+        if (isTab) return;
         e.preventDefault();
         const idx = projectState.shots.findIndex((s) => s.id === projectState.activeShotId);
         const nextIdx = Math.min(projectState.shots.length - 1, idx + 1);
@@ -791,6 +902,7 @@ export default function App() {
           handleSelectShot(projectState.shots[nextIdx].id, true);
         }
       } else if (e.key === 'ArrowLeft') {
+        if (isTab) return;
         e.preventDefault();
         const idx = projectState.shots.findIndex((s) => s.id === projectState.activeShotId);
         const prevIdx = Math.max(0, idx - 1);
@@ -874,6 +986,7 @@ export default function App() {
           onExecuteVoiceCommand={handleExecuteVoiceCommand}
           onAddOrUpdateRule={handleAddOrUpdateRule}
           onToggleMute={handleToggleMute}
+          onTestLocalDictation={handleTestLocalDictation}
         />} shortcuts={<KeyboardShortcutsModal
         isOpen={isShortcutsModalOpen}
         onClose={() => setIsShortcutsModalOpen(false)}

@@ -660,7 +660,25 @@ export async function exportStoryboardAnimaticVideo(
   };
 
   return new Promise((resolve) => {
+    // 45s watchdog timer to prevent indefinite hangs if MediaRecorder stalls
+    const watchdogTimer = setTimeout(() => {
+      try {
+        if (recorder.state !== 'inactive') recorder.stop();
+      } catch {}
+      const blob = chunks.length > 0 ? new Blob(chunks, { type: mimeType }) : null;
+      resolve(blob);
+    }, 45000);
+
+    recorder.onerror = () => {
+      clearTimeout(watchdogTimer);
+      try {
+        if (recorder.state !== 'inactive') recorder.stop();
+      } catch {}
+      resolve(null);
+    };
+
     recorder.onstop = () => {
+      clearTimeout(watchdogTimer);
       const blob = new Blob(chunks, { type: mimeType });
       resolve(blob);
     };
@@ -708,8 +726,9 @@ export async function exportStoryboardAnimaticVideo(
           : shot.promptDescription;
       ctx.fillText(caption, 20, height - 18);
 
+      const shotDurationMs = Math.max(500, Math.round((shot.durationSeconds || 3.5) * 1000));
       shotIdx++;
-      setTimeout(renderNextShot, 550);
+      setTimeout(renderNextShot, shotDurationMs);
     };
 
     renderNextShot();

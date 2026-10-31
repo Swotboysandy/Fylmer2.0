@@ -28,6 +28,7 @@ import { StudioTour } from './StudioTour';
 import { DreamTransitionPanel } from './DreamTransitionPanel';
 import { SceneTransition } from './SceneTransition';
 import { transitionAt } from '../services/sceneTransitions';
+import { speechRecognitionService } from '../services/speechRecognitionService';
 import type { StoryboardShot } from '../types/framelock';
 import './cleanStudio.css';
 type Props = {
@@ -60,10 +61,75 @@ export function CleanStudio(p: Props) {
   const [workspace, setWorkspace] = useState('create'),
     [inputMode, setInputMode] = useState('describe'),
     [command, setCommand] = useState(''),
-    [voiceNotice, setVoiceNotice] = useState(false),
+    [voiceNoticeText, setVoiceNoticeText] = useState<string | null>(null),
+    [isDictating, setIsDictating] = useState(false),
     [voiceOpen, setVoiceOpen] = useState(false),
     [focusDirection, setFocusDirection] = useState(false),
     [inspect, setInspect] = useState(false);
+
+  const handleSimulateVoice = (sampleText: string) => {
+    setVoiceNoticeText('Simulating voice input stream...');
+    void speechRecognitionService.simulateLocalSpeech(sampleText, {
+      onResult: (text, isFinal) => {
+        setCommand(text);
+        if (isFinal) {
+          setVoiceNoticeText(`Simulated: "${text}"`);
+        }
+      },
+      onStateChange: (listening) => setIsDictating(listening),
+    });
+  };
+
+  const handleToggleVoiceDictation = () => {
+    if (isDictating || speechRecognitionService.isListening()) {
+      speechRecognitionService.stopListening();
+      setIsDictating(false);
+      setVoiceNoticeText('Voice dictation stopped.');
+      return;
+    }
+
+    setVoiceNoticeText(null);
+    if (!speechRecognitionService.isSupported()) {
+      setVoiceNoticeText('Web Speech API is unavailable in this browser. Try simulated voice test below.');
+      return;
+    }
+
+    const started = speechRecognitionService.startListening({
+      continuous: true,
+      interimResults: true,
+      onResult: (text, isFinal) => {
+        setCommand(text);
+        p.onTranscript(text);
+        if (isFinal) {
+          setVoiceNoticeText(`Heard: "${text}"`);
+        }
+      },
+      onError: (err) => {
+        setIsDictating(false);
+        setVoiceNoticeText(err + ' You can type your direction or explicitly try sample dictation.');
+      },
+      onStateChange: (listening) => {
+        setIsDictating(listening);
+        if (listening) {
+          setVoiceNoticeText('Listening live... speak your direction.');
+        }
+      },
+    });
+
+    if (!started) {
+      setVoiceNoticeText('Microphone access could not start. Try simulated voice test.');
+    }
+  };
+
+  useEffect(() => {
+    const syncListening = () => {
+      const active = speechRecognitionService.isListening();
+      setIsDictating((prev) => (prev !== active ? active : prev));
+    };
+    const timer = setInterval(syncListening, 250);
+    return () => clearInterval(timer);
+  }, []);
+
   const input = useRef<HTMLDivElement>(null),
     reduced = useReducedMotion();
   useEffect(() => {
@@ -153,15 +219,32 @@ export function CleanStudio(p: Props) {
                     <BeTabsTrigger value="script">Paste a script</BeTabsTrigger>
                   </BeTabsList>
                   <BeTabsContent value="describe">
-                    {voiceNotice && (
-                      <p className="inline-notice" role="status">
-                        Live transcription is not connected. Your typed direction works locally.
-                      </p>
+                    {voiceNoticeText && (
+                      <div className="inline-notice flex items-center justify-between gap-2" role="status">
+                        <span>{voiceNoticeText}</span>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-6 text-xs text-white hover:text-neutral-300 px-1.5 underline"
+                          onClick={() => handleSimulateVoice('I am holding a blue cup in my kitchen. The walls dissolve into an ocean, but the cup stays exactly the same.')}
+                        >
+                          Run Sample Dictation
+                        </Button>
+                      </div>
                     )}
                     <div ref={input} className="creation-composer-slot">
-                      <CreationComposer prompt={command} setPrompt={setCommand} isLoading={p.processing} onSubmit={p.onCommand}
-                        onScript={()=>setInputMode('script')} hasStory={hasStory} onReview={()=>selectWorkspace('review')}
-                        onTools={()=>setInspect(value=>!value)} onVoice={()=>setVoiceOpen(true)} />
+                      <CreationComposer
+                        prompt={command}
+                        setPrompt={setCommand}
+                        isLoading={p.processing}
+                        onSubmit={p.onCommand}
+                        onScript={() => setInputMode('script')}
+                        hasStory={hasStory}
+                        onReview={() => selectWorkspace('review')}
+                        onTools={() => setInspect((value) => !value)}
+                        onVoice={handleToggleVoiceDictation}
+                        isListening={isDictating}
+                      />
                     </div>
                     <p className="input-note">Type a direction, or open the voice preview. Storyboards use local sample scenes.</p>
                     {!hasStory && <div className="starter-suggestions" aria-label="Story suggestions">
@@ -176,13 +259,13 @@ export function CleanStudio(p: Props) {
                       </Button>)}
                     </div>}
                     {hasStory && <div className="direction-suggestions">
-                      <Button variant="outline" size="sm" onClick={() => setCommand('Fix shot 2')}>
+                      <Button variant="outline" size="sm" onClick={() => { setCommand(''); p.onCommand('Fix shot 2'); }}>
                         Fix shot 2 <ArrowUpRight size={12} />
                       </Button>
                       <Button
                         variant="outline"
                         size="sm"
-                        onClick={() => setCommand('Narrate the scene')}
+                        onClick={() => { setCommand(''); p.onCommand('Narrate the scene'); }}
                       >
                         Describe this scene <ArrowUpRight size={12} />
                       </Button>
@@ -360,7 +443,7 @@ export function CleanStudio(p: Props) {
         <span>ANCHORSHOT / LOCAL STUDIO</span>
         <details>
           <summary>Activity</summary>
-          <p role="status" aria-live="polite">
+          <p>
             {p.status}
           </p>
         </details>
@@ -370,10 +453,10 @@ export function CleanStudio(p: Props) {
         {p.status}
       </div>
       {p.shortcuts}
-      <VoiceOverlay open={voiceOpen} onOpenChange={setVoiceOpen} onType={() => {
-        setWorkspace('create');setInputMode('describe');setVoiceNotice(true);
-        setFocusDirection(true);
-      }} />
+      <VoiceOverlay
+        open={voiceOpen}
+        onOpenChange={setVoiceOpen}
+      />
     </div>
   );
 }
