@@ -43,6 +43,7 @@ export interface StoryboardShot {
   id: string;
   shotNumber: number;
   durationSeconds: number;
+  timestamp?: number;
   promptDescription: string;
   spokenDescription: string;
   currentImageUrl: string;

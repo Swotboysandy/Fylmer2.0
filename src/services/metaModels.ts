@@ -794,6 +794,123 @@ export class MetaModelClient {
       return [];
     }
   }
+
+  /**
+   * Meta muse-spark-1.3 Video & Audio Understanding API
+   */
+  public async understandVideoWithMuseSpark(
+    videoUrl?: string,
+    prompt?: string,
+    jobId?: string
+  ): Promise<{
+    model: string;
+    provenance: string;
+    summary: string;
+    audioTranscription: string;
+    detectedObjects: Array<{
+      objectId: string;
+      label: string;
+      confidence: number;
+      bounds: { left: number; top: number; right: number; bottom: number };
+      maskRef?: string;
+    }>;
+    scenes: Array<{
+      shotIndex: number;
+      timestamp: number;
+      label: string;
+      description: string;
+    }>;
+  }> {
+    const res = await fetch('/api/meta/video-understand', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(this.sessionToken ? { 'X-Framelock-Session': this.sessionToken } : {}),
+      },
+      body: JSON.stringify({ videoUrl, prompt, jobId }),
+    });
+    if (!res.ok) throw new Error('Meta Video Understanding API request failed');
+    return res.json();
+  }
+
+  /**
+   * Meta muse-image-1.0 Generative Frame Edit with 0-Drift Sharp Composite
+   */
+  public async editFrameGenerative(
+    imageBase64: string,
+    prompt: string,
+    maskBase64?: string,
+    bounds?: { left: number; top: number; right: number; bottom: number }
+  ): Promise<{
+    editedImageUrl: string;
+    outsideDrift: number;
+    outsideDriftPercent: string;
+    verified: boolean;
+    model: string;
+    provenance: string;
+    promptApplied: string;
+  }> {
+    const res = await fetch('/api/meta/edit-frame', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(this.sessionToken ? { 'X-Framelock-Session': this.sessionToken } : {}),
+      },
+      body: JSON.stringify({ imageBase64, maskBase64, prompt, bounds }),
+    });
+    if (!res.ok) throw new Error('Meta Generative Edit request failed');
+    return res.json();
+  }
+
+  /**
+   * Ingest video keyframes into discrete StoryboardShot objects
+   */
+  public async ingestShotsFromVideo(
+    videoUrl?: string,
+    jobId?: string
+  ): Promise<{ shots: StoryboardShot[] }> {
+    const res = await fetch('/api/video/ingest-shots', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(this.sessionToken ? { 'X-Framelock-Session': this.sessionToken } : {}),
+      },
+      body: JSON.stringify({ videoUrl, jobId }),
+    });
+    if (!res.ok) throw new Error('Video shot ingestion failed');
+    return res.json();
+  }
+
+  /**
+   * Composio YouTube Publishing Integration
+   */
+  public async publishToYouTube(
+    videoUrl: string,
+    title: string,
+    description: string,
+    tags?: string[],
+    privacyStatus?: 'public' | 'unlisted' | 'private'
+  ): Promise<{
+    status: string;
+    platform: string;
+    videoId: string;
+    youtubeUrl: string;
+    title: string;
+    continuityBadge: string;
+    composioConnected: boolean;
+    message: string;
+  }> {
+    const res = await fetch('/api/publish/youtube', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(this.sessionToken ? { 'X-Framelock-Session': this.sessionToken } : {}),
+      },
+      body: JSON.stringify({ videoUrl, title, description, tags, privacyStatus }),
+    });
+    if (!res.ok) throw new Error('YouTube publish request failed');
+    return res.json();
+  }
 }
 
 export const metaModelClient = new MetaModelClient();

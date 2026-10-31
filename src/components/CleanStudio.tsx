@@ -465,7 +465,19 @@ export function CleanStudio(p: Props) {
                       key={s.id}
                       variant="outline"
                       className={shot?.id === s.id ? 'shot-thumb selected' : 'shot-thumb'}
-                      onClick={() => p.onSelect(s.id)}
+                      onClick={() => {
+                        p.onSelect(s.id);
+                        if (typeof s.timestamp === 'number') {
+                          p.onSeek(s.timestamp);
+                        } else {
+                          let offset = 0;
+                          for (const prev of p.shots) {
+                            if (prev.id === s.id) break;
+                            offset += prev.durationSeconds;
+                          }
+                          p.onSeek(offset);
+                        }
+                      }}
                       aria-label={`Select shot ${s.shotNumber}`}
                       aria-pressed={shot?.id === s.id}
                     >
