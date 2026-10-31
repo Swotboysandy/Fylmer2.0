@@ -429,10 +429,16 @@ export const ShotInspectorPanel: React.FC<ShotInspectorPanelProps> = ({
                     : 'border border-[#F59E0B] bg-[#451A03] text-[#FDE047]'
                 }`}
               >
-                {currentMask.provenance === 'live-sam-3.1' ? 'LIVE SAM 3.1' : 'OFFLINE FIXTURE'}
+                {currentMask.provenance === 'live-sam-3.1'
+                  ? `META SAM 3.1 · LIVE (${(currentMask.confidence * 100).toFixed(1)}%)`
+                  : 'OFFLINE FIXTURE'}
               </span>
             </div>
-            <div className="text-[#34D399]">Fixture mask / IoU not measured</div>
+            <div className={currentMask.provenance === 'live-sam-3.1' ? 'text-[#34D399] font-semibold' : 'text-[#34D399]'}>
+              {currentMask.provenance === 'live-sam-3.1'
+                ? `Live Meta Platform API · IoU Confidence ${(currentMask.confidence * 100).toFixed(1)}%`
+                : 'Fixture mask / IoU not measured'}
+            </div>
             <div className="text-[#38BDF8] truncate">
               MASK REF: {currentMask.maskRef}
             </div>

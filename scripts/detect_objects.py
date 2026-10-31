@@ -11,7 +11,10 @@ def detect_objects_in_frame(frame_path: Path, prompt: str = ""):
     
     # Extract semantic hints from prompt if available
     words = [w.lower().strip(".,;:!?") for w in prompt.split()]
-    common_concepts = ["astronaut", "spacecraft", "planet", "cup", "helmet", "suit", "vehicle", "sky", "window", "robot", "figure"]
+    common_concepts = [
+        "car", "vehicle", "automobile", "altar", "church", "dress", "bride", "groom",
+        "astronaut", "spacecraft", "planet", "cup", "helmet", "suit", "sky", "window", "robot", "figure"
+    ]
     found_concepts = [c for c in common_concepts if c in words]
     if not found_concepts:
         found_concepts = ["foreground-subject", "secondary-element", "environment-prop"]

@@ -56,7 +56,20 @@ const KNOWN_COLORS = [
   'purple',
   'cyan',
 ];
-const KNOWN_OBJECTS = ['cup', 'mug', 'umbrella', 'jacket', 'coat'];
+const KNOWN_OBJECTS = [
+  'car',
+  'automobile',
+  'vehicle',
+  'altar',
+  'church',
+  'dress',
+  'gown',
+  'cup',
+  'mug',
+  'umbrella',
+  'jacket',
+  'coat',
+];
 
 export interface MetaApiEnvConfig {
   apiKey: string;
@@ -168,12 +181,20 @@ export class MetaModelClient {
     let detectedObject = 'cup';
     for (const obj of KNOWN_OBJECTS) {
       if (lower.includes(obj)) {
-        detectedObject = obj === 'mug' ? 'cup' : obj === 'coat' ? 'jacket' : obj;
+        detectedObject =
+          obj === 'mug' ? 'cup' :
+          obj === 'coat' ? 'jacket' :
+          obj === 'automobile' || obj === 'vehicle' ? 'car' :
+          obj === 'gown' ? 'dress' :
+          obj;
         break;
       }
     }
 
-    let detectedColor = 'blue';
+    let detectedColor =
+      detectedObject === 'car' || detectedObject === 'dress' || detectedObject === 'altar'
+        ? 'white'
+        : 'blue';
     // Look for "must be <color>" or "remain <color>" or first mentioned color in rule sentence
     const ruleSentence = transcript.split('.')[0]?.toLowerCase() || lower;
     for (const col of KNOWN_COLORS) {
@@ -246,13 +267,15 @@ export class MetaModelClient {
     const targetObject = primaryRule.targetObject;
     const expectedColor = primaryRule.expectedValue;
     const mismatchedColor =
-      expectedColor === 'blue'
+      expectedColor === 'white'
+        ? 'red'
+        : expectedColor === 'blue'
         ? 'red'
         : expectedColor === 'amber'
         ? 'crimson'
         : expectedColor === 'emerald' || expectedColor === 'green'
         ? 'amber'
-        : 'red';
+        : 'blue';
 
     const cameraSequence: Array<SceneRenderSpec['cameraAngle']> = [
       'wide',
@@ -272,6 +295,23 @@ export class MetaModelClient {
       }
     }
 
+    if (Object.keys(parsedDescriptions).length === 0) {
+      const lines = transcript
+        .split(/[\r\n]+/)
+        .map((l) => l.trim())
+        .filter(
+          (l) =>
+            l.length > 5 &&
+            !l.toLowerCase().startsWith('continuity rule') &&
+            !l.toLowerCase().includes('last-minute wedding')
+        );
+      lines.forEach((l, idx) => {
+        if (idx < 6) {
+          parsedDescriptions[idx + 1] = l;
+        }
+      });
+    }
+
     const mismatchShotNumber = targetObject === 'umbrella' ? 3 : 2;
     const shots: StoryboardShot[] = [];
 
@@ -285,15 +325,26 @@ export class MetaModelClient {
 
       const basePrompt =
         parsedDescriptions[shotNumber] ||
-        `${cameraAngle.replace('_', ' ')} shot featuring the detective and the ${actualRenderedColor} ${targetObject} on the counter`;
+        (targetObject === 'car'
+          ? `${cameraAngle.replace('_', ' ')} shot of the ${actualRenderedColor} wedding car on the way to the ceremony`
+          : targetObject === 'altar'
+          ? `${cameraAngle.replace('_', ' ')} shot of the flower-draped wedding altar`
+          : `${cameraAngle.replace('_', ' ')} shot featuring the ${actualRenderedColor} ${targetObject}`);
+
+      const weatherOrMood: SceneRenderSpec['weatherOrMood'] =
+        targetObject === 'umbrella'
+          ? 'fog_pier'
+          : targetObject === 'car' || targetObject === 'altar'
+          ? 'studio_warm'
+          : 'rain_noir';
 
       const { imageUrl, box } = renderMuseStoryboardFrame({
         shotNumber,
         cameraAngle,
-        settingTitle: 'Studio Stage',
+        settingTitle: targetObject === 'car' || targetObject === 'altar' ? 'Wedding Story' : 'Studio Stage',
         targetObject,
         objectColorName: actualRenderedColor,
-        weatherOrMood: targetObject === 'umbrella' ? 'fog_pier' : 'rain_noir',
+        weatherOrMood,
         characterPose: 'seated_detective',
         seed: shotNumber * 17,
       });
@@ -311,7 +362,8 @@ export class MetaModelClient {
           targetObject,
           box,
           isUncertainOcclusion ? 0.724 : 0.986,
-          primaryRule.revision
+          primaryRule.revision,
+          imageUrl
         );
       }
 
@@ -396,9 +448,9 @@ export class MetaModelClient {
     targetObject: string,
     customBox?: BoundingBox,
     confidence: number = 0.986,
-    revision: number = 1
+    revision: number = 1,
+    imageUrl?: string
   ): Promise<SamMask> {
-    await new Promise((r) => setTimeout(r, 180));
     const cameraSequence: Array<SceneRenderSpec['cameraAngle']> = [
       'wide',
       'medium',
@@ -407,6 +459,89 @@ export class MetaModelClient {
     ];
     const angle = cameraSequence[(shotNumber - 1) % cameraSequence.length];
     const box = customBox || getTargetObjectBox(angle, targetObject);
+
+    // Attempt live Meta Platform SAM 3.1 API if session is active
+    if (imageUrl && typeof window !== 'undefined') {
+      try {
+        const healthRes = await fetch('/api/health');
+        if (healthRes.ok) {
+          const health = await healthRes.json();
+          if (health.configured && health.sessionToken) {
+            const base64Data = imageUrl.split(',')[1] || '';
+            const raw = atob(base64Data);
+            const rawBytes = new Uint8Array(raw.length);
+            for (let i = 0; i < raw.length; i++) rawBytes[i] = raw.charCodeAt(i);
+            const hashBuffer = await crypto.subtle.digest('SHA-256', rawBytes);
+            const sourceHash = Array.from(new Uint8Array(hashBuffer))
+              .map((b) => b.toString(16).padStart(2, '0'))
+              .join('');
+
+            const liveRes = await fetch('/api/segment/check', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'X-Framelock-Session': health.sessionToken,
+                'X-Anchorshot-Session': health.sessionToken,
+              },
+              body: JSON.stringify({
+                image: imageUrl,
+                concept: targetObject,
+                sourceHash,
+                shotNumber,
+              }),
+            });
+
+            if (liveRes.ok) {
+              const liveData = await liveRes.json();
+              if (liveData && liveData.objects?.[0]) {
+                const liveObj = liveData.objects[0];
+                const maskCanvas = document.createElement('canvas');
+                maskCanvas.width = 800;
+                maskCanvas.height = 450;
+                const mCtx = maskCanvas.getContext('2d');
+                if (mCtx) {
+                  const pxLeft = (liveObj.bounds.left / liveObj.width) * 800;
+                  const pxTop = (liveObj.bounds.top / liveObj.height) * 450;
+                  const pxW = Math.max(20, ((liveObj.bounds.right - liveObj.bounds.left) / liveObj.width) * 800);
+                  const pxH = Math.max(20, ((liveObj.bounds.bottom - liveObj.bounds.top) / liveObj.height) * 450);
+                  mCtx.fillStyle = '#38BDF8';
+                  mCtx.beginPath();
+                  mCtx.roundRect(pxLeft, pxTop, pxW, pxH, 10);
+                  mCtx.fill();
+                }
+                const maskPngDataUrl = maskCanvas.toDataURL('image/png');
+
+                const liveMask: SamMask = {
+                  id: `mask-${targetObject}-${shotNumber}`,
+                  maskRef: liveData.maskRef || `sam-3.1:${targetObject}:0:v${revision}`,
+                  objectId: '0',
+                  box: {
+                    x: Math.round((liveObj.bounds.left / liveObj.width) * 100),
+                    y: Math.round((liveObj.bounds.top / liveObj.height) * 100),
+                    width: Math.round(((liveObj.bounds.right - liveObj.bounds.left) / liveObj.width) * 100),
+                    height: Math.round(((liveObj.bounds.bottom - liveObj.bounds.top) / liveObj.height) * 100),
+                  },
+                  confidence: liveObj.confidence || 0.95,
+                  maskBase64: maskPngDataUrl,
+                  provenance: 'live-sam-3.1',
+                };
+
+                this.recordCall(
+                  'sam-3.1',
+                  `segmentObject("${targetObject}", Shot ${shotNumber}) [LIVE META API]`,
+                  `Live Meta SAM 3.1 returned maskRef ${liveMask.maskRef} [confidence: ${(liveMask.confidence * 100).toFixed(1)}%, req: ${liveData.requestId}]`
+                );
+                return liveMask;
+              }
+            }
+          }
+        }
+      } catch {
+        // Fall back gracefully to local fixture if network or live call unavailable
+      }
+    }
+
+    await new Promise((r) => setTimeout(r, 180));
     const generatedMask = generateSam3MaskData(
       `${targetObject}-shot-${shotNumber}`,
       box,
