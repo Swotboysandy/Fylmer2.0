@@ -506,20 +506,72 @@ export default function App() {
     }
   }, [projectState.shots, announceStatus]);
 
+  // Toggle Animatic Playback (`isPlayingAnimatic`)
+  const handleTogglePlayAnimatic = useCallback(() => {
+    setProjectState((prev) => {
+      const nextPlaying = !prev.isPlayingAnimatic;
+      if (nextPlaying) {
+        if (currentTimeSeconds >= totalDurationSeconds) setCurrentTimeSeconds(0);
+        setViewMode('animatic');
+        lastNarratedShotIdInAnimaticRef.current = null;
+      } else {
+        speechService.stopSpeaking();
+      }
+      return {
+        ...prev,
+        isPlayingAnimatic: nextPlaying,
+        statusAnnouncement: nextPlaying
+          ? 'Playing storyboard animatic with synchronized voice narration.'
+          : 'Animatic playback paused.',
+      };
+    });
+  }, [currentTimeSeconds, totalDurationSeconds]);
+
   // Execute natural voice or text command (`muse-spark-1.3` intent router)
   const handleExecuteVoiceCommand = useCallback(
     async (commandText: string) => {
-      if (!commandText.trim()) return;
+      const trimmed = commandText.trim();
+      if (!trimmed) return;
       if (!projectState.shots.length) {
-        await handleRebuildFromTranscript(true, commandText.trim());
+        await handleRebuildFromTranscript(true, trimmed);
         return;
       }
-      const lower = commandText.toLowerCase();
+      // Normalize: lower case and clean trailing punctuation
+      const lower = trimmed.toLowerCase().replace(/[.,!?;:]+$/g, '');
 
-      if (lower.includes('fix')) {
-        // Check if a specific shot number was named, otherwise fix active or first mismatched shot
-        const shotMatch = lower.match(/shot\s*(\d+)/);
-        const targetShotNum = shotMatch ? parseInt(shotMatch[1], 10) : null;
+      // Directives: Playback
+      if (lower.startsWith('play') || lower.includes('start animatic') || lower === 'play sequence') {
+        if (!projectState.isPlayingAnimatic) handleTogglePlayAnimatic();
+        return;
+      }
+      if (lower.startsWith('stop') || lower.startsWith('pause')) {
+        if (projectState.isPlayingAnimatic) handleTogglePlayAnimatic();
+        return;
+      }
+
+      // Directives: Help & Shortcuts
+      if (lower.includes('help') || lower.includes('shortcut') || lower.includes('hotkey')) {
+        setIsShortcutsModalOpen(true);
+        announceStatus('Opened keyboard and voice shortcuts dialog.', false);
+        return;
+      }
+
+      // Directives: Audit
+      if (lower.includes('audit') || lower.includes('check continuity')) {
+        await handleRunFullAudit();
+        return;
+      }
+
+      if (lower.includes('fix') || lower.includes('repair')) {
+        // Support numbers ("2", "two", "#2", etc.)
+        const numberWords: Record<string, number> = {
+          '1': 1, 'one': 1, '#1': 1,
+          '2': 2, 'two': 2, '#2': 2,
+          '3': 3, 'three': 3, '#3': 3,
+          '4': 4, 'four': 4, '#4': 4,
+        };
+        const shotMatch = lower.match(/(?:shot|#|\b)\s*(1|2|3|4|one|two|three|four)\b/i);
+        const targetShotNum = shotMatch ? numberWords[shotMatch[1].toLowerCase()] : null;
         const targetShot =
           (targetShotNum
             ? projectState.shots.find((s) => s.shotNumber === targetShotNum)
@@ -545,9 +597,11 @@ export default function App() {
         lower.includes('blue') ||
         lower.includes('red') ||
         lower.includes('purple') ||
-        lower.includes('white')
+        lower.includes('white') ||
+        lower.includes('green') ||
+        lower.includes('yellow')
       ) {
-        const colors = ['emerald', 'amber', 'blue', 'red', 'purple', 'white'];
+        const colors = ['emerald', 'amber', 'blue', 'red', 'purple', 'white', 'green', 'yellow'];
         const chosenColor = colors.find((c) => lower.includes(c)) || 'blue';
         const targetObj = projectState.rules[0]?.targetObject || 'cup';
         await handleAddOrUpdateRule(targetObj, chosenColor);
@@ -555,17 +609,20 @@ export default function App() {
       }
 
       // Default: append to transcript and rebuild sequence
-      const updatedTranscript = `${projectState.transcript} ${commandText}`.trim();
+      const updatedTranscript = `${projectState.transcript} ${trimmed}`.trim();
       await handleRebuildFromTranscript(false, updatedTranscript);
     },
     [
       projectState.shots,
       projectState.rules,
       projectState.transcript,
+      projectState.isPlayingAnimatic,
       activeShot,
       handleApplyProposedFix,
       handleAddOrUpdateRule,
       handleRebuildFromTranscript,
+      handleTogglePlayAnimatic,
+      handleRunFullAudit,
       announceStatus,
     ]
   );
@@ -635,27 +692,6 @@ export default function App() {
       void handleTestLocalDictation();
     }
   }, [announceStatus, handleTestLocalDictation, projectState.isRecording, projectState.transcript]);
-
-  // Toggle Animatic Playback (`isPlayingAnimatic`)
-  const handleTogglePlayAnimatic = useCallback(() => {
-    setProjectState((prev) => {
-      const nextPlaying = !prev.isPlayingAnimatic;
-      if (nextPlaying) {
-        if (currentTimeSeconds >= totalDurationSeconds) setCurrentTimeSeconds(0);
-        setViewMode('animatic');
-        lastNarratedShotIdInAnimaticRef.current = null;
-      } else {
-        speechService.stopSpeaking();
-      }
-      return {
-        ...prev,
-        isPlayingAnimatic: nextPlaying,
-        statusAnnouncement: nextPlaying
-          ? 'Playing storyboard animatic with synchronized voice narration.'
-          : 'Animatic playback paused.',
-      };
-    });
-  }, [currentTimeSeconds, totalDurationSeconds]);
 
   // Animatic Timeline Clock Effect
   useEffect(() => {

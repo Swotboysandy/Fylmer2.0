@@ -543,8 +543,9 @@
 .creation-empty .creation-composer-slot { min-height: 0; margin-top: 28px; text-align: left; }
 .creation-empty .script-label, .creation-empty textarea { text-align: left; }
 @media (max-width: 700px) {
-  .creation-empty { min-height: calc(100dvh - 72px); padding: 80px 20px !important; }
-  .creation-empty .director-column h1 { font-size: 32px; }
+  .clean-studio:has(.creation-empty) { overflow-y: auto; height: auto; min-height: 100dvh; }
+  .creation-empty { min-height: calc(100dvh - 72px); padding: 24px 16px !important; }
+  .creation-empty .director-column h1 { font-size: 28px; }
 }
 
 .creation-empty .intro-copy{font-size:16px}
