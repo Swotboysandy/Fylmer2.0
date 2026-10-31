@@ -85,7 +85,7 @@ function CreationComposer({prompt,isLoading,setPrompt,onSubmit,onScript,onReview
                   className={clsx(
                     "size-9 rounded-full transition-all duration-200",
                     isListening
-                      ? "bg-amber-500 text-black hover:bg-amber-400 border-2 border-amber-300 ring-2 ring-amber-400/40 animate-pulse"
+                      ? "bg-white text-black hover:bg-neutral-200 border-2 border-white ring-2 ring-white/40"
                       : ""
                   )}
                 >

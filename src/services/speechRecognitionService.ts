@@ -5,7 +5,7 @@
  * Supported Modes:
  * 1. Native Web Speech API (`window.SpeechRecognition` / `window.webkitSpeechRecognition`)
  *    - Zero API key spend; utilizes browser-provided speech recognition (cloud ASR in Chrome/Edge, or OS dictation)
- *    - Automatically falls back to offline simulation on network/loopback connectivity errors
+ *    - Reports network errors; simulation is an explicit user action
  * 2. Local Simulation Mode (`simulateLocalSpeech`)
  *    - Allows instant validation without requiring a physical microphone or browser permission grant
  * 3. Local Backend Gateway (`/api/muse/transcribe`)
@@ -171,7 +171,7 @@ class SpeechRecognitionService {
         } else if (event.error === 'no-speech') {
           userMessage = 'No speech detected. Please speak closer to your microphone.';
         } else if (event.error === 'network') {
-          userMessage = 'Browser cloud voice recognition unreachable (network). Switching to local offline dictation.';
+          userMessage = 'Browser cloud voice recognition unreachable (network).';
         }
         if (event.error !== 'no-speech') {
           this.isListeningState = false;

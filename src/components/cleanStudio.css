@@ -561,8 +561,8 @@
 .creation-empty textarea{max-height:120px;overflow-y:auto}
 
 @media (max-width: 700px) {
-  .clean-studio:has(.creation-empty) { overflow-y: auto !important; height: auto !important; min-height: 100dvh; }
-  .creation-empty { min-height: calc(100dvh - 72px); padding: 24px 16px !important; }
+
+  .creation-empty { min-height: 0; padding: 16px 16px 120px !important; }
   .creation-empty .director-column h1 { font-size: 28px; }
 }
 @media(max-height:750px){.creation-empty .eyebrow{margin-bottom:8px}.creation-empty .director-column h1{font-size:36px;margin-bottom:12px}.creation-empty .intro-copy{margin-bottom:16px}.creation-empty .creation-composer-slot{margin-top:16px}.creation-empty textarea{min-height:44px;max-height:80px}}

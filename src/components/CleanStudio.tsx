@@ -106,16 +106,7 @@ export function CleanStudio(p: Props) {
       },
       onError: (err) => {
         setIsDictating(false);
-        if (err.includes('network') || err.includes('unreachable')) {
-          setVoiceNoticeText('Browser cloud voice unreachable (offline). Running local sample dictation...');
-          handleSimulateVoice(
-            hasStory
-              ? 'Fix continuity mismatch in Shot 2 using SAM 3.1'
-              : 'I am holding a blue cup in my kitchen. The walls dissolve into an ocean, but the cup stays exactly the same.'
-          );
-        } else {
-          setVoiceNoticeText(err);
-        }
+        setVoiceNoticeText(err + ' You can type your direction or explicitly try sample dictation.');
       },
       onStateChange: (listening) => {
         setIsDictating(listening);
@@ -234,7 +225,7 @@ export function CleanStudio(p: Props) {
                         <Button
                           variant="ghost"
                           size="sm"
-                          className="h-6 text-xs text-[#38BDF8] hover:text-[#7DD3FC] px-1.5 underline"
+                          className="h-6 text-xs text-white hover:text-neutral-300 px-1.5 underline"
                           onClick={() => handleSimulateVoice('I am holding a blue cup in my kitchen. The walls dissolve into an ocean, but the cup stays exactly the same.')}
                         >
                           Run Sample Dictation

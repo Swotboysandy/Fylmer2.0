@@ -1,0 +1,4 @@
+# PR 4 integration validation
+Preserved monochrome composer/voice states and a non-scrolling first screen. Kept transcript syncing, keyboard handling, continuity repair and export improvements. Removed automatic sample dictation on speech errors; explicitly labeled sample action remains available. Browser speech can use browser cloud services; the orb is local metering.
+
+Validation: production build; 48 unit tests, 8 rendering tests and 1 local API test passed. 22 current browser checks passed across two runs, including desktop/mobile viewport, cup export, two-anchor protection/export, keyboard accessibility and microphone cleanup. The broader discovery run also encountered obsolete editor.spec.ts tests expecting the retired Rain at the window UI (two failures before interruption); those are not represented as passing. No paid model tests executed.
