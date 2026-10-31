@@ -151,6 +151,12 @@ export function CleanStudio(p: Props) {
     if (p.playing) p.onPlay();
     setWorkspace(value);
   };
+
+  useEffect(() => {
+    if (hasStory) {
+      setInspect(true);
+    }
+  }, [hasStory]);
   return (
     <div className="clean-studio dark">
       <a className="clean-skip" href="#clean-main">
@@ -219,6 +225,12 @@ export function CleanStudio(p: Props) {
                     <BeTabsTrigger value="script">Paste a script</BeTabsTrigger>
                   </BeTabsList>
                   <BeTabsContent value="describe">
+                    {p.transcript && (
+                      <div className="flex items-center justify-between text-xs text-[#94a3b8] bg-[#0f172a] border border-[#334155] rounded-xl px-3 py-2 mb-2 font-mono" role="status">
+                        <span className="truncate max-w-[80%]">Script: <span className="text-[#38bdf8]">"{p.transcript}"</span></span>
+                        <span className="text-[10px] text-[#34d399] font-bold shrink-0 ml-2">Synced to Shots</span>
+                      </div>
+                    )}
                     {voiceNoticeText && (
                       <div className="inline-notice flex items-center justify-between gap-2" role="status">
                         <span>{voiceNoticeText}</span>
@@ -237,7 +249,10 @@ export function CleanStudio(p: Props) {
                         prompt={command}
                         setPrompt={setCommand}
                         isLoading={p.processing}
-                        onSubmit={p.onCommand}
+                        onSubmit={(text) => {
+                          p.onCommand(text);
+                          setInspect(true);
+                        }}
                         onScript={() => setInputMode('script')}
                         hasStory={hasStory}
                         onReview={() => selectWorkspace('review')}

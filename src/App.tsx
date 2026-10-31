@@ -19,6 +19,8 @@ import {
 import { VoiceTranscriptPanel } from './components/VoiceTranscriptPanel';
 import { ShotInspectorPanel } from './components/ShotInspectorPanel';
 import { KeyboardShortcutsModal } from './components/KeyboardShortcutsModal';
+import { orcaTracker } from './services/orcaTracker';
+import { OrcaDiagnosticDrawer } from './components/OrcaDiagnosticDrawer';
 
 export default function App() {
   const reducedMotion = useReducedMotion();
@@ -131,6 +133,7 @@ export default function App() {
     async (injectDiscrepancy: boolean = true, overrideTranscript?: string) => {
       const targetTranscript = overrideTranscript ?? projectState.transcript;
       if (!targetTranscript.trim()) return;
+      orcaTracker.trackAction('generation', `Rebuilding storyboard from transcript: "${targetTranscript.slice(0, 60)}..."`, { targetTranscript });
       setProjectState((prev) => ({
         ...prev,
         isProcessing: true,
@@ -143,6 +146,7 @@ export default function App() {
         undefined,
         injectDiscrepancy
       );
+      orcaTracker.trackAction('generation', `Generated ${shots.length} shots (${rules.length} rules)`, { shotCount: shots.length, rulesCount: rules.length });
 
       const mismatchShot = shots.find((s) => s.status === 'mismatch');
       speechService.playEarcon(mismatchShot ? 'mismatch' : 'consistent');
@@ -419,6 +423,7 @@ export default function App() {
   }, []);
 
   const handleUseLocalVideo = useCallback((shotId: string, videoUrl: string, prompt: string, jobId: string) => {
+    orcaTracker.trackAction('generation', `Bound local video ${jobId} to Shot ${shotId}`, { videoUrl, prompt, jobId });
     setProjectState(prev => ({
       ...prev,
       isPlayingAnimatic: false,
@@ -448,6 +453,7 @@ export default function App() {
   }, []);
 
   const handleUpdateDetectedObjects = useCallback((shotId: string, objects: any[]) => {
+    orcaTracker.trackAction('sam', `SAM 3.1 identified ${objects.length} objects for Shot ${shotId}`, { count: objects.length, objects });
     setProjectState(prev => ({
       ...prev,
       shots: prev.shots.map(shot => shot.id === shotId ? {
@@ -1008,51 +1014,56 @@ export default function App() {
     }));
   };
 
-  return <CleanStudio shots={projectState.shots} activeShot={activeShot} transcript={projectState.transcript}
-    processing={projectState.isProcessing} playing={projectState.isPlayingAnimatic} time={currentTimeSeconds} duration={totalDurationSeconds}
-    status={projectState.statusAnnouncement} muted={isMuted} onMute={handleToggleMute}
-    onTranscript={text=>setProjectState(prev=>({...prev,transcript:text}))} onGenerate={()=>void handleRebuildFromTranscript(false)}
-    onCommand={text=>void handleExecuteVoiceCommand(text)} onSelect={id=>handleSelectShot(id)} onPlay={handleTogglePlayAnimatic}
-    onSeek={handleScrubTime} onNarrate={()=>{if(activeShot)handleNarrateShot(activeShot);}} onExport={()=>void handleExportAnimaticVideo()} exporting={isExportingVideo}
-    onAudit={handleRunFullAudit} onShortcuts={()=>setIsShortcutsModalOpen(true)}
-    inspector={<ShotInspectorPanel
-          onUseLocalImage={handleUseLocalImage}
-          onUseLocalVideo={handleUseLocalVideo}
-          onUpdateDetectedObjects={handleUpdateDetectedObjects}
-          onRefreshVideoUrl={handleRefreshVideoUrl}
-          activeShot={activeShot}
-          showSamMaskOverlay={showSamMaskOverlay}
-          showBeforeComparison={showBeforeComparison}
-          isProcessing={projectState.isProcessing}
-          modelLogs={modelLogs}
-          onToggleSamMaskOverlay={() => setShowSamMaskOverlay((prev) => !prev)}
-          onToggleBeforeComparison={handleToggleBeforeComparison}
-          onNarrateShot={handleNarrateShot}
-          onApplyProposedFix={handleApplyProposedFix}
-          onDisambiguateShot={handleDisambiguateShot}
-          onSegmentObjectManual={handleSegmentObjectManual}
-          onRevertShotRevision={handleRevertShotRevision}
-          onUpdateShotPrompt={handleUpdateShotPrompt}
-        />} controls={<VoiceTranscriptPanel
-          transcript={projectState.transcript}
-          isRecording={projectState.isRecording}
-          isProcessing={projectState.isProcessing}
-          isSpeaking={isSpeaking}
-          isMuted={isMuted}
-          rules={projectState.rules}
-          activePresetId={activePresetId}
-          onToggleRecording={handleToggleRecording}
-          onTranscriptChange={(newText) =>
-            setProjectState((prev) => ({ ...prev, transcript: newText }))
-          }
-          onRebuildFromTranscript={handleRebuildFromTranscript}
-          onSelectPreset={handleSelectPreset}
-          onExecuteVoiceCommand={handleExecuteVoiceCommand}
-          onAddOrUpdateRule={handleAddOrUpdateRule}
-          onToggleMute={handleToggleMute}
-          onTestLocalDictation={handleTestLocalDictation}
-        />} shortcuts={<KeyboardShortcutsModal
-        isOpen={isShortcutsModalOpen}
-        onClose={() => setIsShortcutsModalOpen(false)}
-      />} />;
+  return (
+    <>
+      <CleanStudio shots={projectState.shots} activeShot={activeShot} transcript={projectState.transcript}
+        processing={projectState.isProcessing} playing={projectState.isPlayingAnimatic} time={currentTimeSeconds} duration={totalDurationSeconds}
+        status={projectState.statusAnnouncement} muted={isMuted} onMute={handleToggleMute}
+        onTranscript={text=>setProjectState(prev=>({...prev,transcript:text}))} onGenerate={()=>void handleRebuildFromTranscript(false)}
+        onCommand={text=>void handleExecuteVoiceCommand(text)} onSelect={id=>handleSelectShot(id)} onPlay={handleTogglePlayAnimatic}
+        onSeek={handleScrubTime} onNarrate={()=>{if(activeShot)handleNarrateShot(activeShot);}} onExport={()=>void handleExportAnimaticVideo()} exporting={isExportingVideo}
+        onAudit={handleRunFullAudit} onShortcuts={()=>setIsShortcutsModalOpen(true)}
+        inspector={<ShotInspectorPanel
+              onUseLocalImage={handleUseLocalImage}
+              onUseLocalVideo={handleUseLocalVideo}
+              onUpdateDetectedObjects={handleUpdateDetectedObjects}
+              onRefreshVideoUrl={handleRefreshVideoUrl}
+              activeShot={activeShot}
+              showSamMaskOverlay={showSamMaskOverlay}
+              showBeforeComparison={showBeforeComparison}
+              isProcessing={projectState.isProcessing}
+              modelLogs={modelLogs}
+              onToggleSamMaskOverlay={() => setShowSamMaskOverlay((prev) => !prev)}
+              onToggleBeforeComparison={handleToggleBeforeComparison}
+              onNarrateShot={handleNarrateShot}
+              onApplyProposedFix={handleApplyProposedFix}
+              onDisambiguateShot={handleDisambiguateShot}
+              onSegmentObjectManual={handleSegmentObjectManual}
+              onRevertShotRevision={handleRevertShotRevision}
+              onUpdateShotPrompt={handleUpdateShotPrompt}
+            />} controls={<VoiceTranscriptPanel
+              transcript={projectState.transcript}
+              isRecording={projectState.isRecording}
+              isProcessing={projectState.isProcessing}
+              isSpeaking={isSpeaking}
+              isMuted={isMuted}
+              rules={projectState.rules}
+              activePresetId={activePresetId}
+              onToggleRecording={handleToggleRecording}
+              onTranscriptChange={(newText) =>
+                setProjectState((prev) => ({ ...prev, transcript: newText }))
+              }
+              onRebuildFromTranscript={handleRebuildFromTranscript}
+              onSelectPreset={handleSelectPreset}
+              onExecuteVoiceCommand={handleExecuteVoiceCommand}
+              onAddOrUpdateRule={handleAddOrUpdateRule}
+              onToggleMute={handleToggleMute}
+              onTestLocalDictation={handleTestLocalDictation}
+            />} shortcuts={<KeyboardShortcutsModal
+            isOpen={isShortcutsModalOpen}
+            onClose={() => setIsShortcutsModalOpen(false)}
+          />} />
+      <OrcaDiagnosticDrawer />
+    </>
+  );
 }
