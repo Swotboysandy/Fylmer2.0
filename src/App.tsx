@@ -176,9 +176,14 @@ export default function App() {
         const jobsRes = await fetch('/api/local-ai/jobs');
         if (jobsRes.ok) {
           const jobsData = await jobsRes.json();
-          const completedVideo = Array.isArray(jobsData)
+          const targetPromptPrefix = targetTranscript.slice(0, 500).trim();
+          const matchingCompletedVideo = Array.isArray(jobsData)
+            ? jobsData.find((j: any) => j.status === 'completed' && j.kind === 'video' && j.prompt?.trim().startsWith(targetPromptPrefix.slice(0, 50)))
+            : null;
+          const fallbackVideo = Array.isArray(jobsData)
             ? jobsData.find((j: any) => j.status === 'completed' && j.kind === 'video')
             : null;
+          const completedVideo = matchingCompletedVideo || fallbackVideo;
           if (completedVideo) {
             const videoUrl = `/api/local-ai/jobs/${completedVideo.id}/assets/generated-video.mp4`;
             shots = shots.map((s) => ({
@@ -192,8 +197,8 @@ export default function App() {
             });
           }
 
-          // If no completed video yet, kick off background video rendering job
-          if (!completedVideo) {
+          // If no matching video for this prompt, kick off background video rendering job
+          if (!matchingCompletedVideo) {
             fetch('/api/local-ai/jobs', {
               method: 'POST',
               headers: {

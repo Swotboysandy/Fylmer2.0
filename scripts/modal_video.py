@@ -1,7 +1,10 @@
 import modal
-from fastapi import FastAPI, Response
+from fastapi import FastAPI, Response, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import io
+import os
+import tempfile
 
 app = modal.App("anchorshot-video")
 
@@ -16,7 +19,17 @@ image = (
         "accelerate>=0.29.0",
         "imageio[ffmpeg]>=2.34.0",
         "safetensors>=0.4.0",
+        "huggingface_hub>=0.21.0",
     )
+)
+
+web_app = FastAPI(title="AnchorShot Video Generation")
+web_app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 class VideoPromptRequest(BaseModel):
@@ -26,25 +39,62 @@ class VideoPromptRequest(BaseModel):
     fps: int = 8
     seed: int = 42
 
-@app.function(
-    image=image,
-    gpu="A10G",
-    timeout=600,
-)
-@modal.fastapi_endpoint(method="POST")
-def generate(req: VideoPromptRequest):
+# Global cached pipeline
+cached_pipe = None
+
+def get_pipeline():
+    global cached_pipe
+    if cached_pipe is not None:
+        return cached_pipe
+
     import torch
     from diffusers import AnimateDiffPipeline, MotionAdapter, EulerDiscreteScheduler
-    from diffusers.utils import export_to_video
-    import numpy as np
+    from huggingface_hub import hf_hub_download
+    from safetensors.torch import load_file
 
-    adapter = MotionAdapter.from_pretrained("ByteDance/AnimateDiff-Lightning", torch_dtype=torch.float16)
-    pipe = AnimateDiffPipeline.from_pretrained("runwayml/stable-diffusion-v1-5", motion_adapter=adapter, torch_dtype=torch.float16)
-    pipe.scheduler = EulerDiscreteScheduler.from_config(pipe.scheduler.config, timestep_spacing="trailing", beta_schedule="linear")
-    pipe.enable_vae_slicing()
+    repo = "ByteDance/AnimateDiff-Lightning"
+    ckpt = "animatediff_lightning_4step_diffusers.safetensors"
+    base = "runwayml/stable-diffusion-v1-5"
+
+    adapter = MotionAdapter().to(torch.float16)
+    adapter_path = hf_hub_download(repo, ckpt)
+    adapter.load_state_dict(load_file(adapter_path))
+
+    pipe = AnimateDiffPipeline.from_pretrained(
+        base,
+        motion_adapter=adapter,
+        torch_dtype=torch.float16,
+    )
+    pipe.scheduler = EulerDiscreteScheduler.from_config(
+        pipe.scheduler.config,
+        timestep_spacing="trailing",
+        beta_schedule="linear",
+    )
     pipe.to("cuda")
 
+    cached_pipe = pipe
+    return cached_pipe
+
+@web_app.get("/")
+def health():
+    return {
+        "status": "online",
+        "service": "AnchorShot Serverless Cloud Video Generator",
+        "partner": "modal.com",
+        "gpu": "NVIDIA A10G",
+        "pipeline": "AnimateDiff-Lightning (4-step)",
+        "ready": True
+    }
+
+@web_app.post("/")
+@web_app.post("/generate")
+def generate_video(req: VideoPromptRequest):
+    import torch
+    from diffusers.utils import export_to_video
+
+    pipe = get_pipeline()
     generator = torch.Generator("cuda").manual_seed(req.seed)
+
     output = pipe(
         prompt=req.prompt,
         negative_prompt=req.negative_prompt,
@@ -54,15 +104,30 @@ def generate(req: VideoPromptRequest):
         generator=generator,
     )
     frames = output.frames[0]
-    
-    # Save video to buffer
-    import tempfile, os
+
     with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as tmp:
         tmp_path = tmp.name
-    
-    export_to_video(frames, tmp_path, fps=req.fps)
-    with open(tmp_path, "rb") as f:
-        video_bytes = f.read()
-    os.remove(tmp_path)
 
-    return Response(content=video_bytes, media_type="video/mp4")
+    try:
+        export_to_video(frames, tmp_path, fps=req.fps)
+        with open(tmp_path, "rb") as f:
+            video_bytes = f.read()
+    finally:
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
+
+    return Response(
+        content=video_bytes,
+        media_type="video/mp4",
+        headers={"Content-Disposition": 'inline; filename="generated-video.mp4"'},
+    )
+
+@app.function(
+    image=image,
+    gpu="A10G",
+    timeout=600,
+    scaledown_window=300,
+)
+@modal.asgi_app()
+def fastapi_app():
+    return web_app

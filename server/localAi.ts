@@ -138,6 +138,8 @@ export function createLocalAi(root: string, launch = spawn) {
       res.status(400).json({error: 'Choose image or video, a prompt of 1–1500 characters, and an integer seed from 0 to 2147483647.'}); return;
     }
 
+    if (active) { res.status(409).json({error: 'Another GPU job is still running. Wait or cancel it.'}); return; }
+
     const modalEndpoint = process.env.MODAL_VIDEO_ENDPOINT;
     if (kind === 'video' && modalEndpoint) {
       const job: Job = {
@@ -216,7 +218,6 @@ export function createLocalAi(root: string, launch = spawn) {
       return;
     }
 
-    if (active) { res.status(409).json({error: 'Another GPU job is still running. Wait or cancel it.'}); return; }
     if (!requirements.every(p => existsSync(p))) { res.status(503).json({error: 'Local models are not installed. Run scripts/setup_local_ai.ps1 first.'}); return; }
     const job: Job = {id: randomUUID(), kind, prompt: prompt.trim(), seed, status: 'running', message: 'Loading local model…', createdAt: new Date().toISOString()};
     const folder = path.join(output, job.id);
