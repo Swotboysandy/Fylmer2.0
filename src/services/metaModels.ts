@@ -338,7 +338,7 @@ export class MetaModelClient {
           ? 'studio_warm'
           : 'rain_noir';
 
-      const { imageUrl, box } = renderMuseStoryboardFrame({
+      let { imageUrl, box } = renderMuseStoryboardFrame({
         shotNumber,
         cameraAngle,
         settingTitle: targetObject === 'car' || targetObject === 'altar' ? 'Wedding Story' : 'Studio Stage',
@@ -348,6 +348,40 @@ export class MetaModelClient {
         characterPose: 'seated_detective',
         seed: shotNumber * 17,
       });
+
+      // If live Meta API is available, generate real AI frame with muse-image-1.0!
+      if (typeof window !== 'undefined' && shotNumber === mismatchShotNumber) {
+        try {
+          const healthRes = await fetch('/api/health');
+          if (healthRes.ok) {
+            const health = await healthRes.json();
+            if (health.configured && health.sessionToken) {
+              const frameRes = await fetch('/api/meta/generate-frame', {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'X-Framelock-Session': health.sessionToken,
+                  'X-Anchorshot-Session': health.sessionToken,
+                },
+                body: JSON.stringify({ prompt: basePrompt }),
+              });
+              if (frameRes.ok) {
+                const frameData = await frameRes.json();
+                if (frameData.imageUrl) {
+                  imageUrl = frameData.imageUrl;
+                  this.recordCall(
+                    'muse-image-1.0',
+                    `generateFrame(Shot ${shotNumber}) [LIVE META API]`,
+                    `Rendered real 800x450 image via Meta muse-image-1.0 for "${basePrompt.slice(0, 50)}..."`
+                  );
+                }
+              }
+            }
+          }
+        } catch {
+          // Gracefully fallback to canvas image
+        }
+      }
 
       this.recordCall(
         'muse-image-1.0',

@@ -1,5 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import express, { type ErrorRequestHandler } from 'express';
+import sharp from 'sharp';
 import {
   checkInput,
   decodeOfflineSamSelection,
@@ -412,6 +413,116 @@ export function createApp(options: Options) {
         },
       ],
     });
+  });
+
+  /**
+   * Meta Muse Image Generation Endpoint: `POST /api/meta/generate-frame`
+   * Calls `muse-image-1.0` on `https://api.meta.ai/v1/images/generations` and returns PNG data URL.
+   */
+  app.post('/api/meta/generate-frame', async (req, res) => {
+    if (!hasValidSession(req)) {
+      return res.status(403).json({ error: 'Refresh the page before generating a frame.' });
+    }
+    const settings = options.settings();
+    if (!settings.key) {
+      return res.status(503).json({ error: 'Meta AI key not configured.' });
+    }
+    const { prompt, width = 800, height = 450 } = req.body || {};
+    if (typeof prompt !== 'string' || !prompt.trim()) {
+      return res.status(400).json({ error: 'Provide a valid visual prompt.' });
+    }
+
+    try {
+      const metaRes = await fetch('https://api.meta.ai/v1/images/generations', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${settings.key}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: 'muse-image-1.0',
+          prompt: prompt.trim(),
+          size: '512x512',
+        }),
+      });
+
+      if (!metaRes.ok) {
+        const errText = await metaRes.text();
+        return res.status(metaRes.status).json({ error: `Meta Image API returned error: ${errText.slice(0, 200)}` });
+      }
+
+      const metaData = await metaRes.json();
+      const b64 = metaData.data?.[0]?.b64_json;
+      if (!b64) {
+        return res.status(502).json({ error: 'No image data returned from muse-image-1.0' });
+      }
+
+      const webpBuf = Buffer.from(b64, 'base64');
+      const pngBuf = await sharp(webpBuf)
+        .resize(Number(width) || 800, Number(height) || 450, { fit: 'cover' })
+        .png()
+        .toBuffer();
+
+      res.json({
+        imageUrl: `data:image/png;base64,${pngBuf.toString('base64')}`,
+        model: 'muse-image-1.0',
+        provenance: 'live-muse-image-1.0',
+        prompt,
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: `Image generation failed: ${err.message}` });
+    }
+  });
+
+  /**
+   * Meta Muse Wonder Video Director Endpoint: `POST /api/meta/direct-video`
+   * Calls `muse-wonder-1.0` on `https://api.meta.ai/v1/responses` for motion directing.
+   */
+  app.post('/api/meta/direct-video', async (req, res) => {
+    if (!hasValidSession(req)) {
+      return res.status(403).json({ error: 'Refresh the page before directing video.' });
+    }
+    const settings = options.settings();
+    if (!settings.key) {
+      return res.status(503).json({ error: 'Meta AI key not configured.' });
+    }
+    const { prompt } = req.body || {};
+    if (typeof prompt !== 'string' || !prompt.trim()) {
+      return res.status(400).json({ error: 'Provide a valid scene prompt.' });
+    }
+
+    try {
+      const metaRes = await fetch('https://api.meta.ai/v1/responses', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${settings.key}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: 'muse-wonder-1.0',
+          input: `Direct a 2-second cinematic motion video scene: ${prompt.trim()}`,
+        }),
+      });
+
+      if (!metaRes.ok) {
+        const errText = await metaRes.text();
+        return res.status(metaRes.status).json({ error: `Meta Wonder API returned error: ${errText.slice(0, 200)}` });
+      }
+
+      const metaData = await metaRes.json();
+      const textOutput =
+        metaData.output?.[1]?.content?.[0]?.text ||
+        metaData.output?.[0]?.content?.[0]?.text ||
+        'Motion directed.';
+
+      res.json({
+        directorPlan: textOutput,
+        model: 'muse-wonder-1.0',
+        provenance: 'live-muse-wonder-1.0',
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: `Video director failed: ${err.message}` });
+    }
   });
 
   app.use('/api', (_req, res) => res.status(404).json({ error: 'Unknown API endpoint.' }));
