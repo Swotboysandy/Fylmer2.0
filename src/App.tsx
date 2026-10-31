@@ -1,3 +1,4 @@
+import {loadLocal,saveLocal} from './services/projectStorage';
 import {CleanStudio} from './components/CleanStudio';
 import {isLocalImage} from './services/localGeneration';
 import { useReducedMotion } from 'motion/react';
@@ -39,6 +40,26 @@ export default function App() {
     statusAnnouncement:
       'Describe your story or paste a script to begin.',
   });
+
+  const [sessionProjects, setSessionProjects] = useState<ProjectState[]>([]);
+  const [storageReady,setStorageReady]=useState(false);
+  const [storageStatus,setStorageStatus]=useState('Loading local projects...');
+  useEffect(()=>{let alive=true;loadLocal<{active:string;projects:ProjectState[]}>('library').then(saved=>{
+    if(!alive)return;if(saved?.projects?.length){const clean=saved.projects.map(item=>({...item,isProcessing:false,isRecording:false,isPlayingAnimatic:false}));setSessionProjects(clean);setProjectState(clean.find(item=>item.projectId===saved.active)||clean[0]);}setStorageReady(true);setStorageStatus('Saved locally');
+  }).catch(()=>{if(alive)setStorageStatus('Local storage could not be opened. Reload to retry; existing data has not been overwritten.');});return()=>{alive=false};},[]);
+  useEffect(()=>{if(!storageReady)return;setStorageStatus('Saving locally...');let cancelled=false;
+    saveLocal('library',{active:projectState.projectId,projects:[...sessionProjects.filter(item=>item.projectId!==projectState.projectId),{...projectState,isRecording:false,isPlayingAnimatic:false,isProcessing:false}]}).then(()=>{if(!cancelled)setStorageStatus('Saved locally');}).catch(()=>{if(!cancelled)setStorageStatus('Local save failed. Keep this page open and free browser storage.');});return()=>{cancelled=true};
+  },[storageReady,projectState,sessionProjects]);
+  const switchProject = (id?: string) => {
+    if (projectState.isProcessing || isExportingVideo) return;
+    speechRecognitionService.stopListening();
+    setSessionProjects(previous => [...previous.filter(item => item.projectId !== projectState.projectId), {...projectState,isPlayingAnimatic:false,isRecording:false}]);
+    const selected = sessionProjects.find(item => item.projectId === id);
+    setProjectState(selected ? {...selected,isPlayingAnimatic:false,isRecording:false} : {
+      projectId: crypto.randomUUID(), title:'Untitled film', transcript:'',isRecording:false,rules:[],shots:[],activeShotId:null,isPlayingAnimatic:false,isProcessing:false,statusAnnouncement:'New project. Describe your story to begin.'
+    });
+    setCurrentTimeSeconds(0);
+  };
 
   const [activePresetId, setActivePresetId] = useState<string>(initialPreset.id);
   const [showSamMaskOverlay, setShowSamMaskOverlay] = useState<boolean>(true);
@@ -1046,55 +1067,111 @@ export default function App() {
     }));
   };
 
+  if (!storageReady) return <main className="p-8 text-white bg-black min-h-dvh" role="status">{storageStatus}</main>;
   return (
     <>
-      <CleanStudio shots={projectState.shots} activeShot={activeShot} transcript={projectState.transcript}
-        processing={projectState.isProcessing} playing={projectState.isPlayingAnimatic} time={currentTimeSeconds} duration={totalDurationSeconds}
-        status={projectState.statusAnnouncement} muted={isMuted} onMute={handleToggleMute}
-        onTranscript={text=>setProjectState(prev=>({...prev,transcript:text}))} onGenerate={()=>void handleRebuildFromTranscript(false)}
-        onCommand={text=>void handleExecuteVoiceCommand(text)} onSelect={id=>handleSelectShot(id)} onPlay={handleTogglePlayAnimatic}
-        onSeek={handleScrubTime} onNarrate={()=>{if(activeShot)handleNarrateShot(activeShot);}} onExport={()=>void handleExportAnimaticVideo()} exporting={isExportingVideo}
-        onAudit={handleRunFullAudit} onShortcuts={()=>setIsShortcutsModalOpen(true)}
-        inspector={<ShotInspectorPanel
-              onUseLocalImage={handleUseLocalImage}
-              onUseLocalVideo={handleUseLocalVideo}
-              onUpdateDetectedObjects={handleUpdateDetectedObjects}
-              onRefreshVideoUrl={handleRefreshVideoUrl}
-              activeShot={activeShot}
-              showSamMaskOverlay={showSamMaskOverlay}
-              showBeforeComparison={showBeforeComparison}
-              isProcessing={projectState.isProcessing}
-              modelLogs={modelLogs}
-              onToggleSamMaskOverlay={() => setShowSamMaskOverlay((prev) => !prev)}
-              onToggleBeforeComparison={handleToggleBeforeComparison}
-              onNarrateShot={handleNarrateShot}
-              onApplyProposedFix={handleApplyProposedFix}
-              onDisambiguateShot={handleDisambiguateShot}
-              onSegmentObjectManual={handleSegmentObjectManual}
-              onRevertShotRevision={handleRevertShotRevision}
-              onUpdateShotPrompt={handleUpdateShotPrompt}
-            />} controls={<VoiceTranscriptPanel
-              transcript={projectState.transcript}
-              isRecording={projectState.isRecording}
-              isProcessing={projectState.isProcessing}
-              isSpeaking={isSpeaking}
-              isMuted={isMuted}
-              rules={projectState.rules}
-              activePresetId={activePresetId}
-              onToggleRecording={handleToggleRecording}
-              onTranscriptChange={(newText) =>
-                setProjectState((prev) => ({ ...prev, transcript: newText }))
-              }
-              onRebuildFromTranscript={handleRebuildFromTranscript}
-              onSelectPreset={handleSelectPreset}
-              onExecuteVoiceCommand={handleExecuteVoiceCommand}
-              onAddOrUpdateRule={handleAddOrUpdateRule}
-              onToggleMute={handleToggleMute}
-              onTestLocalDictation={handleTestLocalDictation}
-            />} shortcuts={<KeyboardShortcutsModal
+      <CleanStudio
+        onSaveScene={(id, prompt, duration) => {
+          if (!prompt.trim() || !Number.isFinite(duration) || duration < 0.5 || duration > 60) return;
+          setCurrentTimeSeconds(0);
+          setProjectState((previous) => ({
+            ...previous,
+            isPlayingAnimatic: false,
+            shots: previous.shots.map((shot) =>
+              shot.id === id
+                ? {
+                    ...shot,
+                    promptDescription: prompt,
+                    durationSeconds: duration,
+                    spokenDescription: `Scene ${shot.shotNumber}. ${prompt}`,
+                    status: prompt !== shot.promptDescription ? 'uncertain' : shot.status,
+                  }
+                : shot
+            ),
+          }));
+        }}
+        storageStatus={storageStatus}
+        projectId={projectState.projectId}
+        projectTitle={projectState.title}
+        projects={[...sessionProjects.filter((item) => item.projectId !== projectState.projectId), projectState].map((item) => ({
+          id: item.projectId,
+          title: item.title,
+        }))}
+        onNewProject={() => switchProject()}
+        onOpenProject={switchProject}
+        onRenameProject={(title) => setProjectState((previous) => ({ ...previous, title }))}
+        shots={projectState.shots}
+        activeShot={activeShot}
+        transcript={projectState.transcript}
+        processing={projectState.isProcessing}
+        playing={projectState.isPlayingAnimatic}
+        time={currentTimeSeconds}
+        duration={totalDurationSeconds}
+        status={projectState.statusAnnouncement}
+        muted={isMuted}
+        onMute={handleToggleMute}
+        onTranscript={(text) => setProjectState((prev) => ({ ...prev, transcript: text }))}
+        onGenerate={() => void handleRebuildFromTranscript(false)}
+        onCommand={(text) => void handleExecuteVoiceCommand(text)}
+        onSelect={(id) => handleSelectShot(id)}
+        onPlay={handleTogglePlayAnimatic}
+        onSeek={handleScrubTime}
+        onNarrate={() => {
+          if (activeShot) handleNarrateShot(activeShot);
+        }}
+        onExport={() => void handleExportAnimaticVideo()}
+        exporting={isExportingVideo}
+        onAudit={handleRunFullAudit}
+        onShortcuts={() => setIsShortcutsModalOpen(true)}
+        inspector={
+          <ShotInspectorPanel
+            onUseLocalImage={handleUseLocalImage}
+            onUseLocalVideo={handleUseLocalVideo}
+            onUpdateDetectedObjects={handleUpdateDetectedObjects}
+            onRefreshVideoUrl={handleRefreshVideoUrl}
+            activeShot={activeShot}
+            showSamMaskOverlay={showSamMaskOverlay}
+            showBeforeComparison={showBeforeComparison}
+            isProcessing={projectState.isProcessing}
+            modelLogs={modelLogs}
+            onToggleSamMaskOverlay={() => setShowSamMaskOverlay((prev) => !prev)}
+            onToggleBeforeComparison={handleToggleBeforeComparison}
+            onNarrateShot={handleNarrateShot}
+            onApplyProposedFix={handleApplyProposedFix}
+            onDisambiguateShot={handleDisambiguateShot}
+            onSegmentObjectManual={handleSegmentObjectManual}
+            onRevertShotRevision={handleRevertShotRevision}
+            onUpdateShotPrompt={handleUpdateShotPrompt}
+          />
+        }
+        controls={
+          <VoiceTranscriptPanel
+            transcript={projectState.transcript}
+            isRecording={projectState.isRecording}
+            isProcessing={projectState.isProcessing}
+            isSpeaking={isSpeaking}
+            isMuted={isMuted}
+            rules={projectState.rules}
+            activePresetId={activePresetId}
+            onToggleRecording={handleToggleRecording}
+            onTranscriptChange={(newText) =>
+              setProjectState((prev) => ({ ...prev, transcript: newText }))
+            }
+            onRebuildFromTranscript={handleRebuildFromTranscript}
+            onSelectPreset={handleSelectPreset}
+            onExecuteVoiceCommand={handleExecuteVoiceCommand}
+            onAddOrUpdateRule={handleAddOrUpdateRule}
+            onToggleMute={handleToggleMute}
+            onTestLocalDictation={handleTestLocalDictation}
+          />
+        }
+        shortcuts={
+          <KeyboardShortcutsModal
             isOpen={isShortcutsModalOpen}
             onClose={() => setIsShortcutsModalOpen(false)}
-          />} />
+          />
+        }
+      />
       <OrcaDiagnosticDrawer />
     </>
   );

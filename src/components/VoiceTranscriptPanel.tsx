@@ -128,7 +128,7 @@ export const VoiceTranscriptPanel: React.FC<VoiceTranscriptPanelProps> = ({
       <div className="flex flex-col gap-3">
         <div className="flex items-center justify-between gap-2">
           <h2 className="text-lg font-semibold text-white tracking-tight">
-            Voice Director Console
+            Project direction
           </h2>
           <button
             type="button"
@@ -155,14 +155,14 @@ export const VoiceTranscriptPanel: React.FC<VoiceTranscriptPanelProps> = ({
           <div className="flex items-center justify-between text-xs font-mono text-[#E2E8F0]">
             <span>
               {isRecording
-                ? 'STATE: LISTENING (MUSE-VOICE-1.0)'
+                ? 'Listening'
                 : isProcessing
-                ? 'STATE: PROCESSING PIPELINE'
+                ? 'Processing'
                 : isSpeaking
-                ? 'STATE: NARRATING SCREEN'
-                : 'STATE: STANDBY READY'}
+                ? 'Reading scene'
+                : 'Ready'}
             </span>
-            <span className="text-[#94A3B8]">48kHz PCM</span>
+            <span className="text-[#94A3B8]"></span>
           </div>
           <canvas
             ref={waveformCanvasRef}
@@ -219,7 +219,7 @@ export const VoiceTranscriptPanel: React.FC<VoiceTranscriptPanelProps> = ({
       {/* Quick Multimodal Voice/Text Command Bar */}
       <form onSubmit={handleCommandSubmit} className="flex flex-col gap-2">
         <label htmlFor="director-command-input" className="text-sm font-semibold text-[#E2E8F0]">
-          Direct Voice / Text Command (`muse-spark-1.3`)
+          Direction
         </label>
         <div className="flex gap-2">
           <input
@@ -288,7 +288,7 @@ export const VoiceTranscriptPanel: React.FC<VoiceTranscriptPanelProps> = ({
       <div className="flex flex-col gap-2">
         <div className="flex items-center justify-between">
           <label htmlFor="live-transcript-textarea" className="text-sm font-semibold text-[#E2E8F0]">
-            Scene Transcript (`muse-voice-transcribe-1.0`)
+            Scene Transcript
           </label>
           <span className="text-xs font-mono text-[#94A3B8]">Editable</span>
         </div>

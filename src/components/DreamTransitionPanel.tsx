@@ -1,3 +1,4 @@
+import {loadLocal,saveLocal} from '../services/projectStorage';
 import {CupMaskEditor} from './CupMaskEditor';
 import {applyDreamSelections,type CupSelection} from '../services/cupSelection';
 import {useEffect, useRef, useState} from 'react';
@@ -10,7 +11,7 @@ function download(blob:Blob,name:string) {
   const url=URL.createObjectURL(blob), a=document.createElement('a'); a.href=url;a.download=name;a.click();
   setTimeout(()=>URL.revokeObjectURL(url),1000);
 }
-export function DreamTransitionPanel() {
+export function DreamTransitionPanel({projectId='legacy'}:{projectId?:string}) {
   const reduced = Boolean(useReducedMotion());
   const [open,setOpen]=useState(false);
   const [assets,setAssets]=useState<DreamAssets|null>(null);
@@ -18,6 +19,10 @@ export function DreamTransitionPanel() {
   const [editing,setEditing]=useState<'cup'|'umbrella'|null>(null);
   const [umbrella,setUmbrella]=useState<CupSelection|null>(null);
   const [selection,setSelection]=useState<CupSelection|null>(null);
+  const [restored,setRestored]=useState(false);
+  const [saveStatus,setSaveStatus]=useState('Loading saved masks...');
+  useEffect(()=>{let alive=true;loadLocal<{selection:CupSelection|null;umbrella:CupSelection|null}>(`dream:${projectId}`).then(saved=>{if(alive){setSelection(saved?.selection??null);setUmbrella(saved?.umbrella??null);setRestored(true);setSaveStatus('Masks saved locally');}}).catch(()=>{if(alive)setError('Saved masks could not be loaded. Reload to retry.');});return()=>{alive=false};},[projectId]);
+  useEffect(()=>{if(!restored)return;let alive=true;setSaveStatus('Saving masks...');saveLocal(`dream:${projectId}`,{selection,umbrella}).then(()=>{if(alive)setSaveStatus('Masks saved locally');}).catch(()=>{if(alive)setError('Mask save failed. Keep this page open and free browser storage.');});return()=>{alive=false};},[selection,umbrella,restored,projectId]);
   const original=useRef<DreamAssets|null>(null);
   const [time,setTime]=useState(0);
   const [playing,setPlaying]=useState(false);
@@ -30,11 +35,11 @@ export function DreamTransitionPanel() {
   const pixels=useRef<ImageData|null>(null);
   useEffect(()=>()=>operation.current?.abort(),[]);
   useEffect(()=>{
-    if(!open || assets) return;
+    if(!open || assets || !restored) return;
     let cancelled=false;setError('');
-    loadDreamAssets().then(a=>{if(!cancelled){original.current=a;setAssets(a);}}).catch(e=>{if(!cancelled)setError(`Could not load local dream assets: ${e.message}`);});
+    loadDreamAssets().then(a=>{if(!cancelled){original.current=a;setAssets(applyDreamSelections(a,selection,umbrella));}}).catch(e=>{if(!cancelled)setError(`Could not load local dream assets: ${e.message}`);});
     return()=>{cancelled=true;};
-  },[open,assets]);
+  },[open,assets,restored]);
   useEffect(()=>{setPlaying(false);setReport(null);operation.current?.abort();},[reduced]);
   useEffect(()=>{
     if(!playing)return;
@@ -94,6 +99,7 @@ export function DreamTransitionPanel() {
         <p>Two worlds. {umbrella?'Cup and umbrella protected.':'One protected cup.'} A 12-second local composite.</p>
         <span className="inline-flex items-center gap-1"><ShieldCheck size={16} aria-hidden="true"/> {umbrella?'Two layers protected':'Cup layer protected'}</span>
       </div>
+      <p role="status" aria-label="Mask save status">{saveStatus}</p>
       {!assets && !error && <p role="status">Loading local backgrounds…</p>}
       {assets && <>
         <div className="flex flex-wrap gap-2">
