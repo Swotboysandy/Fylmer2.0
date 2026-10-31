@@ -13,8 +13,8 @@ COLOR_MAP = {
     "white": (240, 240, 240)
 }
 
-def recolor_frame(frame_path: Path, mask_arr: np.ndarray, bbox: dict, target_rgb: tuple):
-    img = Image.open(frame_path).convert("RGB")
+def recolor_frame(src_path: Path, dst_path: Path, mask_arr: np.ndarray, bbox: dict, target_rgb: tuple):
+    img = Image.open(src_path).convert("RGB")
     arr = np.array(img).copy()
     
     left = bbox["left"]
@@ -51,7 +51,7 @@ def recolor_frame(frame_path: Path, mask_arr: np.ndarray, bbox: dict, target_rgb
     region[active_mask, 2] = new_b[active_mask]
     
     arr[top:bottom, left:right] = region
-    Image.fromarray(arr).save(frame_path)
+    Image.fromarray(arr).save(dst_path)
     
     pixels_changed = int(np.sum(active_mask))
     return pixels_changed
@@ -86,9 +86,20 @@ def main():
         print("Error: no frame PNGs found", file=sys.stderr)
         sys.exit(1)
         
+    # Idempotency: Preserve untouched pristine frames in raw_frames/
+    raw_frames_dir = args.job_folder / "raw_frames"
+    if not raw_frames_dir.exists():
+        raw_frames_dir.mkdir(parents=True, exist_ok=True)
+        import shutil
+        for fp in frame_paths:
+            shutil.copy2(fp, raw_frames_dir / fp.name)
+
     total_changed = 0
     for frame_path in frame_paths:
-        total_changed += recolor_frame(frame_path, mask_arr, target_obj["bounds"], target_rgb)
+        src_path = raw_frames_dir / frame_path.name
+        if not src_path.exists():
+            src_path = frame_path
+        total_changed += recolor_frame(src_path, frame_path, mask_arr, target_obj["bounds"], target_rgb)
         
     # Re-encode video
     video_out = args.job_folder / "generated-video.mp4"

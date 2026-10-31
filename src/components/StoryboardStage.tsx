@@ -425,22 +425,26 @@ export const StoryboardStage: React.FC<StoryboardStageProps> = ({
                           </span>
                         </div>
                       )}
-                      {shot.detectedObjects?.map((obj) => (
-                        <div
-                          key={obj.id}
-                          style={{
-                            left: `${(obj.bounds.left / 512) * 100}%`,
-                            top: `${(obj.bounds.top / 512) * 100}%`,
-                            width: `${((obj.bounds.right - obj.bounds.left) / 512) * 100}%`,
-                            height: `${((obj.bounds.bottom - obj.bounds.top) / 512) * 100}%`,
-                          }}
-                          className="absolute pointer-events-none border-2 border-dashed border-[#38BDF8] bg-[#38BDF8]/15 rounded-xs"
-                        >
-                          <span className="absolute -top-5 left-0 px-1.5 py-0.5 bg-[#0F172A] border border-[#38BDF8] text-[10px] font-mono font-bold text-white whitespace-nowrap rounded-xs">
-                            {obj.label} ({Math.round(obj.confidence * 100)}%)
-                          </span>
-                        </div>
-                      ))}
+                      {shot.detectedObjects?.map((obj) => {
+                        const frameW = obj.width || 512;
+                        const frameH = obj.height || 512;
+                        return (
+                          <div
+                            key={obj.id}
+                            style={{
+                              left: `${(obj.bounds.left / frameW) * 100}%`,
+                              top: `${(obj.bounds.top / frameH) * 100}%`,
+                              width: `${((obj.bounds.right - obj.bounds.left) / frameW) * 100}%`,
+                              height: `${((obj.bounds.bottom - obj.bounds.top) / frameH) * 100}%`,
+                            }}
+                            className="absolute pointer-events-none border-2 border-dashed border-[#38BDF8] bg-[#38BDF8]/15 rounded-xs"
+                          >
+                            <span className="absolute -top-5 left-0 px-1.5 py-0.5 bg-[#0F172A] border border-[#38BDF8] text-[10px] font-mono font-bold text-white whitespace-nowrap rounded-xs">
+                              {obj.label} ({Math.round(obj.confidence * 100)}%)
+                            </span>
+                          </div>
+                        );
+                      })}
                     </>
                   )}
                 </div>

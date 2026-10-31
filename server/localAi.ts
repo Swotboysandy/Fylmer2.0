@@ -83,8 +83,20 @@ export function createLocalAi(root: string, launch = spawn) {
     if (existsSync(objectsFile)) {
       try { res.json(JSON.parse(readFileSync(objectsFile, 'utf8'))); return; } catch {}
     }
+    if (!existsSync(python)) {
+      res.status(503).json({error: 'Python runtime not found. Run scripts/setup_local_ai.ps1 first.'});
+      return;
+    }
+    let responded = false;
     const proc = launch(python, [path.join(root, 'scripts/detect_objects.py'), folder, '--prompt', job.prompt], {cwd: root, windowsHide: true});
+    proc.on('error', err => {
+      if (responded) return;
+      responded = true;
+      res.status(500).json({error: `Failed to spawn detection process: ${err.message}`});
+    });
     proc.on('close', code => {
+      if (responded) return;
+      responded = true;
       if (code === 0 && existsSync(objectsFile)) {
         try { res.json(JSON.parse(readFileSync(objectsFile, 'utf8'))); return; } catch {}
       }
@@ -97,8 +109,20 @@ export function createLocalAi(root: string, launch = spawn) {
     if (!job || job.status !== 'completed') { res.status(404).json({error: 'Job not found or not completed.'}); return; }
     const {objectId = '0', color = 'emerald'} = req.body || {};
     const folder = path.join(output, job.id);
+    if (!existsSync(python)) {
+      res.status(503).json({error: 'Python runtime not found. Run scripts/setup_local_ai.ps1 first.'});
+      return;
+    }
+    let responded = false;
     const proc = launch(python, [path.join(root, 'scripts/modify_video.py'), folder, '--object-id', String(objectId), '--color', String(color)], {cwd: root, windowsHide: true});
+    proc.on('error', err => {
+      if (responded) return;
+      responded = true;
+      res.status(500).json({error: `Failed to spawn modification process: ${err.message}`});
+    });
     proc.on('close', code => {
+      if (responded) return;
+      responded = true;
       const reportFile = path.join(folder, 'modification-report.json');
       if (code === 0 && existsSync(reportFile)) {
         try { res.json(JSON.parse(readFileSync(reportFile, 'utf8'))); return; } catch {}

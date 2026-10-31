@@ -57,6 +57,8 @@ export interface StoryboardShot {
     label: string;
     concept: string;
     confidence: number;
+    width?: number;
+    height?: number;
     bounds: { left: number; top: number; right: number; bottom: number };
     rasterWidth: number;
     rasterHeight: number;
