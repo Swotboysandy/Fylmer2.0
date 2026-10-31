@@ -12,16 +12,15 @@
 param(
   [switch]$DumpErrors,
   [switch]$Screenshot,
+  [switch]$TestVoice,
   [string]$Action
 )
 
 $ErrorActionPreference = "Stop"
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 
-if ($DumpErrors) {
-  node "$scriptDir/orca_audit.mjs"
-  exit $LASTEXITCODE
-}
+$nodeArgs = @()
+if ($TestVoice) { $nodeArgs += "--test-voice" }
 
-node "$scriptDir/orca_audit.mjs"
+node "$scriptDir/orca_audit.mjs" @nodeArgs
 exit $LASTEXITCODE

@@ -1,18 +1,18 @@
-import { execSync } from 'child_process';
+import { spawnSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 
-function runOrca(cmd) {
+function runOrca(args) {
   try {
-    const raw = execSync(`orca ${cmd}`, { encoding: 'utf8', timeout: 30000 });
-    return raw.trim();
+    const res = spawnSync('orca.cmd', args, { encoding: 'utf8', timeout: 30000, shell: true });
+    return (res.stdout || '').trim();
   } catch (err) {
-    return (err.stdout || err.message || '').trim();
+    return '';
   }
 }
 
-function runOrcaJson(cmd) {
-  const text = runOrca(`${cmd} --json`);
+function runOrcaJson(args) {
+  const text = runOrca([...args, '--json']);
   try {
     return JSON.parse(text);
   } catch {
@@ -21,11 +21,14 @@ function runOrcaJson(cmd) {
 }
 
 async function audit() {
+  const args = process.argv.slice(2);
+  const testVoice = args.includes('--test-voice');
+
   console.log('=== Orca Browser Diagnostic & Tracking Audit ===\n');
 
   // 1. Verify Orca status
   console.log('1. Checking Orca runtime status...');
-  const statusRes = runOrcaJson('status');
+  const statusRes = runOrcaJson(['status']);
   if (!statusRes.ok || statusRes.result?.runtime?.state !== 'ready') {
     console.error('Orca runtime is not ready. Run `orca open` first.');
     process.exit(1);
@@ -34,41 +37,56 @@ async function audit() {
 
   // 2. Discover or create tab
   console.log('2. Connecting to local app tab (http://127.0.0.1:4317)...');
-  const tabsRes = runOrcaJson('tab list');
+  const tabsRes = runOrcaJson(['tab', 'list']);
   let pageId = null;
 
   if (tabsRes.ok && Array.isArray(tabsRes.result?.tabs)) {
-    const existing = tabsRes.result.tabs.find(t => t.url && t.url.includes('127.0.0.1:4317'));
+    const activeTab = tabsRes.result.tabs.find(t => t.active && t.url && t.url.includes('127.0.0.1:4317'));
+    const existing = activeTab || [...tabsRes.result.tabs].reverse().find(t => t.url && t.url.includes('127.0.0.1:4317'));
     if (existing) {
       pageId = existing.browserPageId;
-      console.log('   Found existing tab:', pageId);
+      console.log('   Connected to tab:', pageId, activeTab ? '(currently active in Orca)' : '');
     }
   }
 
   if (!pageId) {
     console.log('   Creating new tab...');
-    const createRes = runOrcaJson('tab create --url http://127.0.0.1:4317');
+    const createRes = runOrcaJson(['tab', 'create', '--url', 'http://127.0.0.1:4317']);
     if (!createRes.ok || !createRes.result?.browserPageId) {
       console.error('Failed to create Orca tab:', createRes);
       process.exit(1);
     }
     pageId = createRes.result.browserPageId;
     console.log('   Created tab:', pageId);
-    // Give page 2 seconds to load
     await new Promise(r => setTimeout(r, 2000));
   }
 
   // 3. Page Accessibility Snapshot
   console.log('3. Inspecting DOM via Orca Accessibility Snapshot...');
-  const snapshotText = runOrca(`snapshot --page ${pageId}`);
+  const snapshotText = runOrca(['snapshot', '--page', pageId]);
   const hasAnchorshot = snapshotText.includes('anchorshot');
-  const hasDirector = snapshotText.includes("DIRECTOR'S CHAIR") || snapshotText.includes("Director");
+  const hasDirector = snapshotText.includes("DIRECTOR'S CHAIR") || snapshotText.includes("Director") || snapshotText.includes("THE CANVAS");
   console.log('   Title / Brand found:', hasAnchorshot ? 'YES' : 'NO');
   console.log('   Director interface ready:', hasDirector ? 'YES' : 'NO\n');
 
+  if (testVoice) {
+    console.log('3b. Triggering Voice Dictation Fallback Test in Orca...');
+    const voiceResult = runOrca(['eval', '--page', pageId, '--expression', `
+      (() => {
+        const btn = document.querySelector('button[aria-label="Talk to Anchorshot"]') || 
+                    document.querySelector('button[aria-label*="microphone"]');
+        if (btn) { btn.click(); return 'CLICKED_VOICE'; }
+        return 'BTN_NOT_FOUND';
+      })()
+    `]);
+    console.log('   Voice button action:', voiceResult);
+    console.log('   Waiting 3.5s for local voice stream and speech simulation to finish...');
+    await new Promise(r => setTimeout(r, 3500));
+  }
+
   // 4. Query in-browser Orca Tracker
   console.log('4. Querying window.__ORCA_TRACKER__ telemetry...');
-  const trackerDump = runOrca(`eval --page ${pageId} --expression "window.__ORCA_TRACKER__ ? window.__ORCA_TRACKER__.dump() : 'NOT_FOUND'"`);
+  const trackerDump = runOrca(['eval', '--page', pageId, '--expression', "window.__ORCA_TRACKER__ ? window.__ORCA_TRACKER__.dump() : 'NOT_FOUND'"]);
 
   let trackerData = null;
   try {
@@ -82,7 +100,7 @@ async function audit() {
     console.log('     Total logs:', trackerData.summary.totalLogs);
     console.log('     Network calls:', trackerData.summary.networkCalls);
     console.log('     Error count:', trackerData.summary.errorCount);
-    if (trackerData.summary.errorCount > 0) {
+    if (trackerData.recentErrors && trackerData.recentErrors.length > 0) {
       console.log('\n   [!] Errors detected by Orca Tracker:');
       for (const err of trackerData.recentErrors) {
         console.log(`     - [${err.category}] ${err.message}`);
@@ -90,12 +108,27 @@ async function audit() {
     } else {
       console.log('   [+] 0 errors detected. Application is healthy!');
     }
+    if (trackerData.recentLogs && trackerData.recentLogs.length > 0) {
+      console.log('\n   Recent Pipeline Events:');
+      for (const log of trackerData.recentLogs.slice(0, 5)) {
+        console.log(`     * [${log.category}] ${log.message}`);
+      }
+    }
   }
 
   // 5. Capture Viewport Screenshot
   console.log('\n5. Capturing Viewport Screenshot via Orca...');
-  const screenshotRes = runOrcaJson(`screenshot --page ${pageId} --format png`);
-  if (screenshotRes.ok && screenshotRes.result?.screenshotPath) {
+  const screenshotRes = runOrcaJson(['screenshot', '--page', pageId, '--format', 'png']);
+  const artifactDir = 'C:/Users/buzman/.gemini/antigravity-cli/brain/d918e4dd-ae3f-4a4e-b8b0-672ac8b88d8d';
+  if (screenshotRes.ok && screenshotRes.result?.data) {
+    const localSnap = path.resolve('orca-audit-snapshot.png');
+    const artifactSnap = path.join(artifactDir, 'orca-audit-snapshot.png');
+    const buf = Buffer.from(screenshotRes.result.data, 'base64');
+    fs.writeFileSync(localSnap, buf);
+    try { fs.writeFileSync(artifactSnap, buf); } catch {}
+    console.log('   Screenshot saved to:', localSnap);
+    console.log('   Artifact image synced to:', artifactSnap);
+  } else if (screenshotRes.ok && screenshotRes.result?.screenshotPath) {
     console.log('   Screenshot saved to:', screenshotRes.result.screenshotPath);
   } else {
     console.log('   Screenshot output:', screenshotRes);

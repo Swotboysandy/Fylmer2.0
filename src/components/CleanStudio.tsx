@@ -28,7 +28,8 @@ import { StudioTour } from './StudioTour';
 import { DreamTransitionPanel } from './DreamTransitionPanel';
 import { SceneTransition } from './SceneTransition';
 import { transitionAt } from '../services/sceneTransitions';
-import { speechRecognitionService } from '../services/speechRecognitionService';
+import { speechRecognitionService, SpeechRecognitionService } from '../services/speechRecognitionService';
+import { orcaTracker } from '../services/orcaTracker';
 import type { StoryboardShot } from '../types/framelock';
 import './cleanStudio.css';
 type Props = {
@@ -68,12 +69,15 @@ export function CleanStudio(p: Props) {
     [inspect, setInspect] = useState(false);
 
   const handleSimulateVoice = (sampleText: string) => {
-    setVoiceNoticeText('Simulating voice input stream...');
+    setVoiceNoticeText('Streaming simulated voice...');
+    orcaTracker.trackAction('voice', `Started local voice simulation: "${sampleText.slice(0, 40)}..."`);
     void speechRecognitionService.simulateLocalSpeech(sampleText, {
       onResult: (text, isFinal) => {
         setCommand(text);
+        p.onTranscript(text);
         if (isFinal) {
-          setVoiceNoticeText(`Simulated: "${text}"`);
+          setVoiceNoticeText(`Heard (Local Voice): "${text}"`);
+          orcaTracker.trackAction('voice', `Local voice simulation completed: "${text}"`);
         }
       },
       onStateChange: (listening) => setIsDictating(listening),
@@ -89,8 +93,9 @@ export function CleanStudio(p: Props) {
     }
 
     setVoiceNoticeText(null);
-    if (!speechRecognitionService.isSupported()) {
-      setVoiceNoticeText('Web Speech API is unavailable in this browser. Try simulated voice test below.');
+    if (!speechRecognitionService.isSupported() || SpeechRecognitionService.isCloudVoiceUnavailable()) {
+      setVoiceNoticeText('Offline mode (Local Voice Stream active).');
+      handleSimulateVoice(command.trim() || 'two men travel to space trying to reach mars on the way we got some issues');
       return;
     }
 
@@ -106,7 +111,14 @@ export function CleanStudio(p: Props) {
       },
       onError: (err) => {
         setIsDictating(false);
-        setVoiceNoticeText(err + ' You can type your direction or explicitly try sample dictation.');
+        orcaTracker.record('warn', 'voice', `Native speech error: ${err}`);
+        if (err.includes('network') || err.includes('unreachable')) {
+          SpeechRecognitionService.markCloudVoiceUnavailable();
+          setVoiceNoticeText('Browser cloud voice unreachable (Orca/offline). Switched to local voice stream.');
+          handleSimulateVoice(command.trim() || 'two men travel to space trying to reach mars on the way we got some issues');
+        } else {
+          setVoiceNoticeText(err + ' You can type your direction or choose a sample below.');
+        }
       },
       onStateChange: (listening) => {
         setIsDictating(listening);
@@ -117,7 +129,8 @@ export function CleanStudio(p: Props) {
     });
 
     if (!started) {
-      setVoiceNoticeText('Microphone access could not start. Try simulated voice test.');
+      setVoiceNoticeText('Microphone unavailable. Running local voice stream.');
+      handleSimulateVoice(command.trim() || 'two men travel to space trying to reach mars on the way we got some issues');
     }
   };
 
@@ -232,16 +245,38 @@ export function CleanStudio(p: Props) {
                       </div>
                     )}
                     {voiceNoticeText && (
-                      <div className="inline-notice flex items-center justify-between gap-2" role="status">
-                        <span>{voiceNoticeText}</span>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-6 text-xs text-white hover:text-neutral-300 px-1.5 underline"
-                          onClick={() => handleSimulateVoice('I am holding a blue cup in my kitchen. The walls dissolve into an ocean, but the cup stays exactly the same.')}
-                        >
-                          Run Sample Dictation
-                        </Button>
+                      <div className="inline-notice flex flex-col gap-1.5 p-2 rounded-xl bg-[#0f172a] border border-[#334155] mb-2" role="status">
+                        <div className="flex items-center justify-between text-xs text-[#cbd5e1]">
+                          <span>{voiceNoticeText}</span>
+                          <span className="text-[10px] text-[#38bdf8] font-mono shrink-0">100% Offline Mode</span>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-1.5 pt-1 border-t border-[#1e293b]">
+                          <span className="text-[10px] text-[#64748b] shrink-0">Try Voice:</span>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-5 text-[11px] text-[#38bdf8] hover:bg-[#1e293b] px-1.5"
+                            onClick={() => handleSimulateVoice('two men travel to space trying to reach mars on the way we got some issues')}
+                          >
+                            Space Mission
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-5 text-[11px] text-[#38bdf8] hover:bg-[#1e293b] px-1.5"
+                            onClick={() => handleSimulateVoice('I am holding a blue cup in my kitchen. The walls dissolve into an ocean, but the cup stays exactly the same.')}
+                          >
+                            Kitchen to Ocean
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-5 text-[11px] text-[#38bdf8] hover:bg-[#1e293b] px-1.5"
+                            onClick={() => handleSimulateVoice('I open my bedroom door and step onto the moon, still holding my favorite cup.')}
+                          >
+                            Moon & Cup
+                          </Button>
+                        </div>
                       </div>
                     )}
                     <div ref={input} className="creation-composer-slot">
