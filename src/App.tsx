@@ -578,17 +578,6 @@ export default function App() {
     }
   }, [projectState.shots]);
 
-  const handlePublishYouTube = useCallback(async (videoUrl: string) => {
-    orcaTracker.trackAction('generation', `Publishing video to YouTube via Composio: ${videoUrl}`, { videoUrl });
-    const res = await metaModelClient.publishToYouTube(
-      videoUrl,
-      projectState.title || 'A Last-Minute Wedding — Directed with Anchorshot',
-      projectState.transcript || 'Emergency journey to the church altar; directed with Anchorshot SAM 3.1 0-drift guarantee.'
-    );
-    orcaTracker.record('info', 'system', `Published to YouTube: ${res.youtubeUrl} (status: ${res.status})`);
-    return res;
-  }, [projectState.title, projectState.transcript]);
-
   const handleUpdateDetectedObjects = useCallback((shotId: string, objects: any[]) => {
     orcaTracker.trackAction('sam', `SAM 3.1 identified ${objects.length} objects for Shot ${shotId}`, { count: objects.length, objects });
     setProjectState(prev => ({
@@ -1214,7 +1203,6 @@ export default function App() {
             onUpdateDetectedObjects={handleUpdateDetectedObjects}
             onRefreshVideoUrl={handleRefreshVideoUrl}
             onGenerativeEdit={handleGenerativeEdit}
-            onPublishYouTube={handlePublishYouTube}
             activeShot={activeShot}
             showSamMaskOverlay={showSamMaskOverlay}
             showBeforeComparison={showBeforeComparison}

@@ -880,37 +880,6 @@ export class MetaModelClient {
     if (!res.ok) throw new Error('Video shot ingestion failed');
     return res.json();
   }
-
-  /**
-   * Composio YouTube Publishing Integration
-   */
-  public async publishToYouTube(
-    videoUrl: string,
-    title: string,
-    description: string,
-    tags?: string[],
-    privacyStatus?: 'public' | 'unlisted' | 'private'
-  ): Promise<{
-    status: string;
-    platform: string;
-    videoId: string;
-    youtubeUrl: string;
-    title: string;
-    continuityBadge: string;
-    composioConnected: boolean;
-    message: string;
-  }> {
-    const res = await fetch('/api/publish/youtube', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...(this.sessionToken ? { 'X-Framelock-Session': this.sessionToken } : {}),
-      },
-      body: JSON.stringify({ videoUrl, title, description, tags, privacyStatus }),
-    });
-    if (!res.ok) throw new Error('YouTube publish request failed');
-    return res.json();
-  }
 }
 
 export const metaModelClient = new MetaModelClient();

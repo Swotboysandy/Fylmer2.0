@@ -23,7 +23,6 @@ interface ShotInspectorPanelProps {
   onUpdateDetectedObjects?: (shotId: string, objects: any[]) => void;
   onRefreshVideoUrl?: (shotId: string, newVideoUrl: string) => void;
   onGenerativeEdit?: (shotId: string, prompt: string, objectId?: string) => Promise<void>;
-  onPublishYouTube?: (videoUrl: string) => Promise<any>;
   activeShot: StoryboardShot | null;
   showSamMaskOverlay: boolean;
   showBeforeComparison?: boolean;
@@ -54,7 +53,6 @@ export const ShotInspectorPanel: React.FC<ShotInspectorPanelProps> = ({
   onUpdateDetectedObjects,
   onRefreshVideoUrl,
   onGenerativeEdit,
-  onPublishYouTube,
   activeShot,
   showSamMaskOverlay,
   showBeforeComparison = false,
@@ -80,8 +78,6 @@ export const ShotInspectorPanel: React.FC<ShotInspectorPanelProps> = ({
   const [videoModNotice, setVideoModNotice] = useState<string>('');
   const [generativeEditPrompt, setGenerativeEditPrompt] = useState('');
   const [isApplyingGenEdit, setIsApplyingGenEdit] = useState(false);
-  const [isPublishingYouTube, setIsPublishingYouTube] = useState(false);
-  const [youtubePublishResult, setYoutubePublishResult] = useState<{ url?: string; message?: string } | null>(null);
 
   if (activeShot && (activeShot.id !== lastSyncedShotId || activeShot.promptDescription !== lastSyncedPrompt)) {
     setLastSyncedShotId(activeShot.id);
@@ -163,24 +159,6 @@ export const ShotInspectorPanel: React.FC<ShotInspectorPanelProps> = ({
       setVideoModNotice(e instanceof Error ? e.message : 'Generative edit failed.');
     } finally {
       setIsApplyingGenEdit(false);
-    }
-  };
-
-  const handlePublishToYouTube = async () => {
-    if (!onPublishYouTube || !activeShot.videoUrl) return;
-    setIsPublishingYouTube(true);
-    setVideoModNotice('');
-    try {
-      const res = await onPublishYouTube(activeShot.videoUrl);
-      setYoutubePublishResult({
-        url: res?.youtubeUrl,
-        message: res?.message || 'Video staged for 1-click publishing via Composio.',
-      });
-      setVideoModNotice('Published to YouTube via Composio.');
-    } catch (e) {
-      setVideoModNotice(e instanceof Error ? e.message : 'Publishing failed.');
-    } finally {
-      setIsPublishingYouTube(false);
     }
   };
 
@@ -482,42 +460,6 @@ export const ShotInspectorPanel: React.FC<ShotInspectorPanelProps> = ({
                   </button>
                 </div>
               </div>
-            </div>
-          )}
-
-          {/* Composio 1-Click YouTube Publishing Integration */}
-          {activeShot.videoUrl && (
-            <div className="mt-2 p-3 bg-[#0F172A] border border-[#38BDF8]/40 rounded flex flex-col gap-2">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-bold text-white flex items-center gap-1.5">
-                  <svg className="w-4 h-4 text-red-500 fill-current" viewBox="0 0 24 24"><path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/></svg>
-                  <span>Publish to YouTube</span>
-                </span>
-                <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-emerald-950 text-emerald-400 border border-emerald-700">
-                  Composio Authorized
-                </span>
-              </div>
-              <p className="text-[11px] text-[#94A3B8]">
-                Publish video with SAM 3.1 continuity certificate directly to your channel.
-              </p>
-              <button
-                type="button"
-                disabled={isPublishingYouTube}
-                onClick={handlePublishToYouTube}
-                className="w-full min-h-[36px] px-3 py-1.5 bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white font-bold text-xs rounded flex items-center justify-center gap-2 transition-colors shadow"
-              >
-                <span>{isPublishingYouTube ? 'Publishing via Composio...' : '1-Click Upload to YouTube'}</span>
-              </button>
-              {youtubePublishResult && (
-                <div className="text-[11px] font-mono text-emerald-400 p-2 bg-emerald-950/40 rounded border border-emerald-800">
-                  <span>{youtubePublishResult.message}</span>
-                  {youtubePublishResult.url && (
-                    <a href={youtubePublishResult.url} target="_blank" rel="noreferrer" className="text-sky-400 underline block mt-1">
-                      {youtubePublishResult.url}
-                    </a>
-                  )}
-                </div>
-              )}
             </div>
           )}
 

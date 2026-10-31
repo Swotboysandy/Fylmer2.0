@@ -23,7 +23,8 @@ async function main() {
   // Step 1: Detect Active Orca Tab
   const tabsResRaw = runOrca('tab list --json');
   const tabsRes = JSON.parse(tabsResRaw);
-  const activeTab = tabsRes.result?.tabs?.find(t => t.url && t.url.includes('127.0.0.1:4317'));
+  const tabsList = tabsRes.result?.tabs || [];
+  const activeTab = tabsList.find(t => t.url && t.url.includes('4317')) || tabsList[0];
   const pageId = activeTab?.browserPageId;
   console.log('Target Orca Tab:', pageId);
   if (!pageId) throw new Error('No active Orca tab found');
@@ -99,28 +100,12 @@ async function main() {
   console.log('Generative Edit trigger:', genEditResult);
   await sleep(4000);
 
-  // Step 7: Test 1-Click Publishing to YouTube via Composio
-  console.log('\n[Phase 6] Testing 1-Click YouTube Publishing via Composio...');
-  const youtubePublishResult = evalOrca(pageId, `(() => {
-    const ytBtn = Array.from(document.querySelectorAll('button')).find(b =>
-      b.textContent.includes('1-Click Upload to YouTube') ||
-      b.textContent.includes('Publish to YouTube')
-    );
-    if (ytBtn) {
-      ytBtn.click();
-      return 'CLICKED_YOUTUBE_PUBLISH';
-    }
-    return 'YOUTUBE_PUBLISH_BTN_NOT_FOUND';
-  })()`);
-  console.log('YouTube publish trigger:', youtubePublishResult);
-  await sleep(3000);
-
-  // Step 8: Capture Final State & Status Announcements
-  console.log('\n[Phase 7] Reading System Status & Verification Proof...');
+  // Step 7: Capture Final State & Status Announcements
+  console.log('\n[Phase 6] Reading System Status & Verification Proof...');
   const finalState = evalOrca(pageId, `(() => {
     const statusText = document.querySelector('[role=\"status\"]')?.textContent || '';
-    const notice = Array.from(document.querySelectorAll('p, div')).find(el => el.textContent.includes('0 outside drift') || el.textContent.includes('YouTube'))?.textContent || '';
-    const videoProof = Array.from(document.querySelectorAll('div, span')).find(el => el.textContent.includes('16 FRAMES · 0 DRIFT') || el.textContent.includes('Composio Authorized'))?.textContent || '';
+    const notice = Array.from(document.querySelectorAll('p, div')).find(el => el.textContent.includes('0 outside drift') || el.textContent.includes('SAM 3.1'))?.textContent || '';
+    const videoProof = Array.from(document.querySelectorAll('div, span')).find(el => el.textContent.includes('16 FRAMES · 0 DRIFT'))?.textContent || '';
     return {
       statusText: statusText.trim().replace(/\\s+/g, ' '),
       notice: notice.trim().replace(/\\s+/g, ' '),
@@ -129,7 +114,7 @@ async function main() {
   })()`);
   console.log('Final Verification Status:', finalState);
 
-  // Step 9: Take high-resolution screenshot
+  // Step 8: Take high-resolution screenshot
   const screenshotPath = 'C:/Users/buzman/.gemini/antigravity-cli/brain/d918e4dd-ae3f-4a4e-b8b0-672ac8b88d8d/meta-storyboard-verified-live.png';
   console.log(`\n[Phase 8] Capturing Orca screenshot to: ${screenshotPath}...`);
   try {

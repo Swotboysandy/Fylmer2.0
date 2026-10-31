@@ -784,64 +784,6 @@ export function createApp(options: Options) {
     }
   });
 
-  // 4. Composio YouTube Publishing Integration
-  app.post('/api/publish/youtube', async (req, res) => {
-    try {
-      const { videoUrl, title, description, tags, privacyStatus = 'unlisted' } = req.body || {};
-      const composioKey = process.env.COMPOSIO_API_KEY;
-
-      const videoHash = createHash('sha256').update(String(videoUrl || title || Date.now())).digest('hex').slice(0, 11);
-      const simulatedYoutubeId = `yt_${videoHash}`;
-
-      if (composioKey) {
-        try {
-          const compRes = await fetch('https://backend.composio.dev/api/v1/actions/YOUTUBE_UPLOAD_VIDEO', {
-            method: 'POST',
-            headers: {
-              'X-API-KEY': composioKey,
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-              title: title || 'A Last-Minute Wedding — Directed with Anchorshot',
-              description: `${description || ''}\n\n[Verified with Anchorshot SAM 3.1: 0 Outside Pixel Drift]`,
-              privacy_status: privacyStatus,
-              tags: tags || ['AI Film', 'Meta Muse', 'SAM 3.1', 'Anchorshot'],
-              video_file: videoUrl,
-            }),
-          });
-
-          if (compRes.ok) {
-            const data = await compRes.json();
-            return res.json({
-              status: 'published',
-              platform: 'YouTube via Composio',
-              videoId: data.videoId || simulatedYoutubeId,
-              youtubeUrl: data.url || `https://youtu.be/${simulatedYoutubeId}`,
-              title,
-              composioActionId: data.actionExecutionId,
-              verifiedContinuity: 'SAM 3.1 0-Drift Guarantee',
-            });
-          }
-        } catch {}
-      }
-
-      res.json({
-        status: 'staged_for_youtube',
-        platform: 'YouTube via Composio',
-        videoId: simulatedYoutubeId,
-        youtubeUrl: `https://youtu.be/${simulatedYoutubeId}`,
-        title: title || 'A Last-Minute Wedding — Directed with Anchorshot',
-        description: `${description || 'Wedding emergency journey to the church altar.'}\n\n[Continuity Certified: 0 outside-mask pixel drift across all 16 frames]`,
-        privacyStatus,
-        continuityBadge: 'SAM 3.1 Verified · 0 Outside-Mask Pixel Drift',
-        composioConnected: true,
-        message: 'Film and SAM 3.1 audit credentials packaged and ready for 1-click publishing to your authenticated YouTube channel.',
-      });
-    } catch (err: any) {
-      res.status(500).json({ error: `YouTube publishing failed: ${err.message}` });
-    }
-  });
-
   app.use('/api', (_req, res) => res.status(404).json({ error: 'Unknown API endpoint.' }));
 
   const errorHandler: ErrorRequestHandler = (error: unknown, _req, res, _next) => {
