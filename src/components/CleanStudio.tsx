@@ -356,7 +356,23 @@ export function CleanStudio(p: Props) {
                   <span className="sample-badge">Sample storyboard</span>
                 </div>
                 <div className="preview-frame">
-                  {shot ? (
+                  {shot?.videoUrl ? (
+                    <div className="relative w-full h-full flex items-center justify-center bg-black rounded overflow-hidden">
+                      <video
+                        key={shot.videoUrl}
+                        src={shot.videoUrl}
+                        controls
+                        autoPlay
+                        loop
+                        playsInline
+                        className="w-full h-full object-contain"
+                        aria-label={`Video preview of shot ${shot.shotNumber}: ${shot.promptDescription}`}
+                      />
+                      <div className="absolute top-2 right-2 px-2 py-0.5 bg-[#10B981] text-black text-[10px] font-bold rounded flex items-center gap-1 shadow">
+                        <span>AI VIDEO PREVIEW</span>
+                      </div>
+                    </div>
+                  ) : shot ? (
                     <SceneTransition
                       source={shot.currentImageUrl}
                       destination={
@@ -373,15 +389,17 @@ export function CleanStudio(p: Props) {
                     SHOT {String(shot?.shotNumber ?? 1).padStart(2, '0')}{' '}
                     <span>/ {String(p.shots.length).padStart(2, '0')}</span>
                   </div>
-                  <Button
-                    size="icon"
-                    className="preview-play"
-                    onClick={p.onPlay}
-                    disabled={!p.shots.length}
-                    aria-label={p.playing ? 'Pause preview' : 'Play preview'}
-                  >
-                    {p.playing ? <Pause size={26} /> : <Play size={26} />}
-                  </Button>
+                  {!shot?.videoUrl && (
+                    <Button
+                      size="icon"
+                      className="preview-play"
+                      onClick={p.onPlay}
+                      disabled={!p.shots.length}
+                      aria-label={p.playing ? 'Pause preview' : 'Play preview'}
+                    >
+                      {p.playing ? <Pause size={26} /> : <Play size={26} />}
+                    </Button>
+                  )}
                 </div>
                 <div className="preview-transport">
                   <Button

@@ -141,7 +141,7 @@ export default function App() {
           'Running muse-spark-1.3 shot planner and muse-image-1.0 storyboard synthesis...',
       }));
 
-      const { rules, shots } = await metaModelClient.generateStoryboardFromTranscript(
+      let { rules, shots } = await metaModelClient.generateStoryboardFromTranscript(
         targetTranscript,
         undefined,
         injectDiscrepancy
@@ -149,6 +149,38 @@ export default function App() {
       orcaTracker.trackAction('generation', `Generated ${shots.length} shots (${rules.length} rules)`, { shotCount: shots.length, rulesCount: rules.length });
 
       const mismatchShot = shots.find((s) => s.status === 'mismatch');
+
+      // Auto-mount completed video into canvas preview if available
+      try {
+        const jobsRes = await fetch('/api/local-ai/jobs');
+        if (jobsRes.ok) {
+          const jobsData = await jobsRes.json();
+          const completedVideo = Array.isArray(jobsData)
+            ? jobsData.find((j: any) => j.status === 'completed' && j.kind === 'video')
+            : null;
+          if (completedVideo) {
+            const targetIdx = mismatchShot ? shots.findIndex((s) => s.id === mismatchShot.id) : 1;
+            if (targetIdx >= 0 && shots[targetIdx]) {
+              shots = shots.map((s, idx) =>
+                idx === targetIdx
+                  ? {
+                      ...s,
+                      videoUrl: `/api/local-ai/jobs/${completedVideo.id}/assets/generated-video.mp4`,
+                      generatedJobId: completedVideo.id,
+                    }
+                  : s
+              );
+              orcaTracker.trackAction('generation', `Auto-mounted video into Canvas Shot ${shots[targetIdx].shotNumber}`, {
+                jobId: completedVideo.id,
+                videoUrl: `/api/local-ai/jobs/${completedVideo.id}/assets/generated-video.mp4`,
+              });
+            }
+          }
+        }
+      } catch {
+        // Fallback cleanly without video
+      }
+
       speechService.playEarcon(mismatchShot ? 'mismatch' : 'consistent');
 
       const summaryMsg = mismatchShot
